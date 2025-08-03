@@ -68,6 +68,8 @@ const TIME_TYPES = [
 export const TimeEntry: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [interval, setInterval] = useState<15 | 30 | 60>(30);
+  const [startHour, setStartHour] = useState(6);
+  const [endHour, setEndHour] = useState(22);
   const [multipleMode, setMultipleMode] = useState(false);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
@@ -84,8 +86,6 @@ export const TimeEntry: React.FC = () => {
   // Générer les créneaux horaires
   const generateTimeSlots = useCallback(() => {
     const slots: TimeSlot[] = [];
-    const startHour = 6;
-    const endHour = 22;
     
     for (let hour = startHour; hour < endHour; hour++) {
       for (let minute = 0; minute < 60; minute += interval) {
@@ -107,7 +107,7 @@ export const TimeEntry: React.FC = () => {
     }
     
     return slots;
-  }, [interval]);
+  }, [interval, startHour, endHour]);
 
   // Initialiser les créneaux
   useEffect(() => {
@@ -120,7 +120,7 @@ export const TimeEntry: React.FC = () => {
       const parsed: DayPlanning = JSON.parse(savedData);
       setTimeSlots(parsed.creneaux);
     }
-  }, [selectedDate, interval, generateTimeSlots]);
+  }, [selectedDate, interval, startHour, endHour, generateTimeSlots]);
 
   // Charger les templates
   useEffect(() => {
@@ -421,9 +421,9 @@ export const TimeEntry: React.FC = () => {
 
               {/* Intervalle */}
               <div className="flex items-center space-x-2">
-                <Label>Intervalle:</Label>
+                <Label htmlFor="interval">Intervalle :</Label>
                 <Select value={interval.toString()} onValueChange={(value) => setInterval(Number(value) as 15 | 30 | 60)}>
-                  <SelectTrigger className="w-24">
+                  <SelectTrigger className="w-28">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -434,9 +434,39 @@ export const TimeEntry: React.FC = () => {
                 </Select>
               </div>
 
+              {/* Plage horaire */}
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="timeRange">Plage :</Label>
+                <Select value={startHour.toString()} onValueChange={(value) => setStartHour(Number(value))}>
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 18 }, (_, i) => i + 5).map(hour => (
+                      <SelectItem key={hour} value={hour.toString()}>
+                        {hour.toString().padStart(2, '0')}h
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">à</span>
+                <Select value={endHour.toString()} onValueChange={(value) => setEndHour(Number(value))}>
+                  <SelectTrigger className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 18 }, (_, i) => i + 6).map(hour => (
+                      <SelectItem key={hour} value={hour.toString()} disabled={hour <= startHour}>
+                        {hour.toString().padStart(2, '0')}h
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Mode sélection */}
               <div className="flex items-center space-x-2">
-                <Label>Mode multiple:</Label>
+                <Label htmlFor="multipleMode">Mode multiple :</Label>
                 <Switch checked={multipleMode} onCheckedChange={setMultipleMode} />
               </div>
             </div>
@@ -589,7 +619,7 @@ export const TimeEntry: React.FC = () => {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>
-              Créneaux horaires - {interval} minutes
+              Créneaux horaires - {interval} minutes ({startHour.toString().padStart(2, '0')}h à {endHour.toString().padStart(2, '0')}h)
               {selectedSlots.length > 0 && (
                 <Badge variant="secondary" className="ml-2">
                   {selectedSlots.length} sélectionné(s)
