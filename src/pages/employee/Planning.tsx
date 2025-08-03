@@ -1,31 +1,137 @@
 import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Coffee, Home, Calendar as CalendarIcon, Clock, MapPin, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 
 const daysOfWeek = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+const daysOfWeekFull = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 const months = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
   'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
 
-// Données de démonstration
-const shifts = {
-  '2024-01-15': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-16': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-17': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-18': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-19': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-22': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-23': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-24': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-25': { type: 'work', hours: '08:30 - 17:30' },
-  '2024-01-26': { type: 'vacation', hours: 'Congé' },
-};
+// Structure enrichie des données de planning
+interface PlanningShift {
+  start: string;
+  end: string;
+  pauseStart: string;
+  pauseEnd: string;
+  location: string;
+  totalHours: number;
+  task?: string;
+  notes?: string;
+}
+
+interface PlanningDay {
+  date: string;
+  type: 'travail' | 'conge' | 'repos' | 'ferie' | 'maladie' | 'mi-temps';
+  shifts: PlanningShift[];
+}
+
+// Données de démonstration enrichies
+const enrichedPlanning: PlanningDay[] = [
+  {
+    date: '2024-01-15',
+    type: 'travail',
+    shifts: [{
+      start: '08:30',
+      end: '17:30',
+      pauseStart: '12:00',
+      pauseEnd: '13:00',
+      location: 'Bureau',
+      totalHours: 8,
+      task: 'Développement Frontend',
+      notes: 'Réunion équipe à 14h'
+    }]
+  },
+  {
+    date: '2024-01-16',
+    type: 'travail',
+    shifts: [{
+      start: '08:30',
+      end: '17:30',
+      pauseStart: '12:00',
+      pauseEnd: '13:00',
+      location: 'Bureau',
+      totalHours: 8,
+      task: 'Tests et Debug'
+    }]
+  },
+  {
+    date: '2024-01-17',
+    type: 'mi-temps',
+    shifts: [{
+      start: '09:00',
+      end: '13:00',
+      pauseStart: '',
+      pauseEnd: '',
+      location: 'Télétravail',
+      totalHours: 4,
+      task: 'Formation'
+    }]
+  },
+  {
+    date: '2024-01-18',
+    type: 'travail',
+    shifts: [{
+      start: '08:30',
+      end: '17:30',
+      pauseStart: '12:00',
+      pauseEnd: '13:00',
+      location: 'Bureau',
+      totalHours: 8,
+      task: 'Réunion client'
+    }]
+  },
+  {
+    date: '2024-01-19',
+    type: 'conge',
+    shifts: []
+  },
+  {
+    date: '2024-01-20',
+    type: 'repos',
+    shifts: []
+  },
+  {
+    date: '2024-01-21',
+    type: 'repos',
+    shifts: []
+  },
+  {
+    date: '2024-01-22',
+    type: 'travail',
+    shifts: [{
+      start: '08:30',
+      end: '17:30',
+      pauseStart: '12:00',
+      pauseEnd: '13:00',
+      location: 'Bureau',
+      totalHours: 8,
+      task: 'Développement Backend'
+    }]
+  },
+  {
+    date: '2024-01-23',
+    type: 'maladie',
+    shifts: []
+  },
+  {
+    date: '2024-01-24',
+    type: 'ferie',
+    shifts: []
+  }
+];
 
 export const Planning: React.FC = () => {
-  const [currentDate, setCurrentDate] = useState(new Date(2024, 0, 1)); // Janvier 2024
+  const [currentDate, setCurrentDate] = useState(new Date(2024, 0, 15)); // 15 Janvier 2024
+  const [viewMode, setViewMode] = useState<'jour' | 'semaine' | 'mois'>('mois');
+  const [selectedDay, setSelectedDay] = useState<PlanningDay | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   const getDaysInMonth = (date: Date) => {
     return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -40,113 +146,401 @@ export const Planning: React.FC = () => {
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   };
 
-  const navigateMonth = (direction: 'prev' | 'next') => {
-    setCurrentDate(prev => {
-      const newDate = new Date(prev);
-      newDate.setMonth(prev.getMonth() + (direction === 'next' ? 1 : -1));
-      return newDate;
-    });
+  const navigateDate = (direction: 'prev' | 'next') => {
+    const newDate = new Date(currentDate);
+    if (viewMode === 'jour') {
+      newDate.setDate(currentDate.getDate() + (direction === 'next' ? 1 : -1));
+    } else if (viewMode === 'semaine') {
+      newDate.setDate(currentDate.getDate() + (direction === 'next' ? 7 : -7));
+    } else {
+      newDate.setMonth(currentDate.getMonth() + (direction === 'next' ? 1 : -1));
+    }
+    setCurrentDate(newDate);
   };
 
-  const daysInMonth = getDaysInMonth(currentDate);
-  const firstDay = getFirstDayOfMonth(currentDate);
-  const today = new Date();
-  const isCurrentMonth = today.getFullYear() === currentDate.getFullYear() && 
-                         today.getMonth() === currentDate.getMonth();
+  const getPlanningForDate = (date: string): PlanningDay | null => {
+    return enrichedPlanning.find(p => p.date === date) || null;
+  };
 
-  const renderCalendarDays = () => {
-    const days = [];
-    
-    // Jours vides en début de mois
-    for (let i = 0; i < firstDay; i++) {
-      days.push(<div key={`empty-${i}`} className="h-16"></div>);
+  const getTypeColor = (type: PlanningDay['type']) => {
+    switch (type) {
+      case 'travail': return 'bg-primary text-primary-foreground';
+      case 'mi-temps': return 'bg-blue-100 text-blue-800';
+      case 'conge': return 'bg-orange-100 text-orange-800';
+      case 'repos': return 'bg-gray-100 text-gray-800';
+      case 'ferie': return 'bg-purple-100 text-purple-800';
+      case 'maladie': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const getTypeLabel = (type: PlanningDay['type']) => {
+    switch (type) {
+      case 'travail': return 'Travail';
+      case 'mi-temps': return 'Mi-temps';
+      case 'conge': return 'Congé';
+      case 'repos': return 'Repos';
+      case 'ferie': return 'Férié';
+      case 'maladie': return 'Maladie';
+      default: return type;
+    }
+  };
+
+  const handleDayClick = (day: PlanningDay) => {
+    setSelectedDay(day);
+    setIsDetailModalOpen(true);
+  };
+
+  const renderDayView = () => {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    const dayPlanning = getPlanningForDate(dateStr);
     
-    // Jours du mois
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateKey = formatDateKey(currentDate.getFullYear(), currentDate.getMonth(), day);
-      const shift = shifts[dateKey];
-      const isToday = isCurrentMonth && day === today.getDate();
-      
-      days.push(
-        <div
-          key={day}
-          className={`h-16 border border-border p-1 ${
-            isToday ? 'bg-accent' : 'bg-card'
-          }`}
-        >
-          <div className={`text-sm font-medium ${
-            isToday ? 'text-accent-foreground' : 'text-card-foreground'
-          }`}>
-            {day}
-          </div>
-          {shift && (
-            <div className={`text-xs mt-1 px-1 py-0.5 rounded ${
-              shift.type === 'work' 
-                ? 'bg-primary text-primary-foreground' 
-                : 'bg-destructive text-destructive-foreground'
-            }`}>
-              {shift.type === 'work' ? '8h30' : 'Congé'}
-            </div>
-          )}
+    if (!dayPlanning || dayPlanning.shifts.length === 0) {
+      return (
+        <div className="text-center py-8">
+          <CalendarIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground">Aucun créneau planifié pour cette journée</p>
         </div>
       );
     }
-    
-    return days;
+
+    const shift = dayPlanning.shifts[0];
+    const hours = Array.from({ length: 17 }, (_, i) => i + 6); // 6h à 22h
+
+    return (
+      <div className="space-y-6">
+        <div className="text-center">
+          <h3 className="text-lg font-semibold">
+            {currentDate.toLocaleDateString('fr-FR', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric'
+            })}
+          </h3>
+          <Badge className={getTypeColor(dayPlanning.type)} variant="secondary">
+            {getTypeLabel(dayPlanning.type)}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Timeline */}
+          <div className="lg:col-span-3">
+            <div className="relative">
+              {hours.map(hour => (
+                <div key={hour} className="flex items-center h-12 border-b border-border">
+                  <div className="w-16 text-sm text-muted-foreground">
+                    {hour.toString().padStart(2, '0')}:00
+                  </div>
+                  <div className="flex-1 relative">
+                    {/* Bloc de travail */}
+                    {shift.start && (
+                      (() => {
+                        const startHour = parseInt(shift.start.split(':')[0]);
+                        const startMin = parseInt(shift.start.split(':')[1]);
+                        const endHour = parseInt(shift.end.split(':')[0]);
+                        const endMin = parseInt(shift.end.split(':')[1]);
+                        
+                        if (hour >= startHour && hour < endHour) {
+                          const isFirstHour = hour === startHour;
+                          const isLastHour = hour === endHour - 1;
+                          
+                          return (
+                            <div className={`absolute left-2 right-2 bg-primary text-primary-foreground rounded-md p-2 ${
+                              isFirstHour ? 'top-' + Math.floor(startMin / 60 * 48) : 'top-0'
+                            } ${
+                              isLastHour ? 'bottom-' + Math.floor((60 - endMin) / 60 * 48) : 'bottom-0'
+                            }`}>
+                              {isFirstHour && (
+                                <div className="text-xs font-medium">
+                                  {shift.task || 'Travail'}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        
+                        // Bloc de pause
+                        if (shift.pauseStart && shift.pauseEnd) {
+                          const pauseStartHour = parseInt(shift.pauseStart.split(':')[0]);
+                          const pauseEndHour = parseInt(shift.pauseEnd.split(':')[0]);
+                          
+                          if (hour >= pauseStartHour && hour < pauseEndHour) {
+                            return (
+                              <div className="absolute left-2 right-2 top-0 bottom-0 bg-muted border-2 border-dashed border-muted-foreground rounded-md flex items-center justify-center">
+                                <Coffee className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            );
+                          }
+                        }
+                        
+                        return null;
+                      })()
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Informations latérales */}
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Détails</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">{shift.start} - {shift.end}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <MapPin className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">{shift.location}</span>
+                </div>
+                {shift.pauseStart && (
+                  <div className="flex items-center space-x-2">
+                    <Coffee className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">{shift.pauseStart} - {shift.pauseEnd}</span>
+                  </div>
+                )}
+                <div className="flex items-center space-x-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">{shift.totalHours}h travaillées</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {shift.notes && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Notes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">{shift.notes}</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderWeekView = () => {
+    const startOfWeek = new Date(currentDate);
+    const day = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+
+    const weekDays = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      return date;
+    });
+
+    return (
+      <div className="space-y-4">
+        <div className="text-center">
+          <h3 className="text-lg font-semibold">
+            Semaine du {weekDays[0].getDate()} au {weekDays[6].getDate()} {months[currentDate.getMonth()]} {currentDate.getFullYear()}
+          </h3>
+        </div>
+
+        <div className="grid grid-cols-7 gap-2">
+          {weekDays.map((date, index) => {
+            const dateStr = date.toISOString().split('T')[0];
+            const dayPlanning = getPlanningForDate(dateStr);
+            const isToday = date.toDateString() === new Date().toDateString();
+
+            return (
+              <div key={index} className="space-y-2">
+                <div className="text-center">
+                  <p className="text-sm font-medium">{daysOfWeek[index]}</p>
+                  <p className={`text-lg font-bold ${isToday ? 'text-primary' : 'text-foreground'}`}>
+                    {date.getDate()}
+                  </p>
+                  {isToday && <Badge variant="secondary" className="text-xs">Aujourd'hui</Badge>}
+                </div>
+
+                <div className="min-h-32 border border-border rounded-lg p-2">
+                  {dayPlanning ? (
+                    <div 
+                      className={`p-2 rounded cursor-pointer hover:opacity-80 transition-opacity ${getTypeColor(dayPlanning.type)}`}
+                      onClick={() => handleDayClick(dayPlanning)}
+                    >
+                      {dayPlanning.shifts.length > 0 ? (
+                        <div className="text-xs space-y-1">
+                          <div>{dayPlanning.shifts[0].start}-{dayPlanning.shifts[0].end}</div>
+                          {dayPlanning.shifts[0].pauseStart && (
+                            <div className="flex items-center space-x-1">
+                              <Coffee className="h-3 w-3" />
+                              <span>{dayPlanning.shifts[0].pauseStart}-{dayPlanning.shifts[0].pauseEnd}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center space-x-1">
+                            <MapPin className="h-3 w-3" />
+                            <span>{dayPlanning.shifts[0].location}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-center">
+                          {getTypeLabel(dayPlanning.type)}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground text-center py-4">
+                      Libre
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMonthView = () => {
+    const daysInMonth = getDaysInMonth(currentDate);
+    const firstDay = getFirstDayOfMonth(currentDate);
+    const today = new Date();
+    const isCurrentMonth = today.getFullYear() === currentDate.getFullYear() && 
+                           today.getMonth() === currentDate.getMonth();
+
+    const renderCalendarDays = () => {
+      const days = [];
+      
+      // Jours vides en début de mois
+      for (let i = 0; i < firstDay; i++) {
+        days.push(<div key={`empty-${i}`} className="h-20"></div>);
+      }
+      
+      // Jours du mois
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateKey = formatDateKey(currentDate.getFullYear(), currentDate.getMonth(), day);
+        const dayPlanning = getPlanningForDate(dateKey);
+        const isToday = isCurrentMonth && day === today.getDate();
+        
+        days.push(
+          <div
+            key={day}
+            className={`h-20 border border-border p-1 cursor-pointer hover:bg-accent transition-colors ${
+              isToday ? 'bg-accent ring-2 ring-primary' : 'bg-card'
+            }`}
+            onClick={() => dayPlanning && handleDayClick(dayPlanning)}
+          >
+            <div className={`text-sm font-medium mb-1 ${
+              isToday ? 'text-primary font-bold' : 'text-card-foreground'
+            }`}>
+              {day}
+            </div>
+            {dayPlanning && (
+              <div className="space-y-1">
+                {dayPlanning.shifts.length > 0 ? (
+                  <div className={`text-xs px-1 py-0.5 rounded ${getTypeColor(dayPlanning.type)}`}>
+                    {dayPlanning.shifts[0].start}-{dayPlanning.shifts[0].end}
+                  </div>
+                ) : (
+                  <div className={`text-xs px-1 py-0.5 rounded ${getTypeColor(dayPlanning.type)}`}>
+                    {getTypeLabel(dayPlanning.type)}
+                  </div>
+                )}
+                {dayPlanning.shifts[0]?.pauseStart && (
+                  <div className="flex items-center space-x-1 text-xs text-muted-foreground">
+                    <Coffee className="h-3 w-3" />
+                    <span>{dayPlanning.shifts[0].pauseStart}-{dayPlanning.shifts[0].pauseEnd}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+      
+      return days;
+    };
+
+    return (
+      <div className="space-y-4">
+        {/* En-têtes des jours */}
+        <div className="grid grid-cols-7 gap-0 mb-2">
+          {daysOfWeek.map(day => (
+            <div
+              key={day}
+              className="h-8 flex items-center justify-center text-sm font-medium text-muted-foreground"
+            >
+              {day}
+            </div>
+          ))}
+        </div>
+        
+        {/* Grille du calendrier */}
+        <div className="grid grid-cols-7 gap-0 border border-border rounded-lg overflow-hidden">
+          {renderCalendarDays()}
+        </div>
+      </div>
+    );
   };
 
   return (
     <DashboardLayout>
       <div className="p-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Mon Planning</h1>
-          <p className="text-muted-foreground">Consultez vos horaires et plannings</p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Mon Planning</h1>
+            <p className="text-muted-foreground">Consultez vos horaires et plannings</p>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigateDate('prev')}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="text-sm font-medium min-w-48 text-center">
+              {viewMode === 'jour' && currentDate.toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              })}
+              {viewMode === 'semaine' && `Semaine du ${currentDate.toLocaleDateString('fr-FR')}`}
+              {viewMode === 'mois' && `${months[currentDate.getMonth()]} ${currentDate.getFullYear()}`}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigateDate('next')}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Calendrier */}
+          {/* Contenu principal */}
           <Card className="lg:col-span-3">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>
-                  {months[currentDate.getMonth()]} {currentDate.getFullYear()}
-                </CardTitle>
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigateMonth('prev')}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigateMonth('next')}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
+                <CardTitle>Planning</CardTitle>
+                <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as any)}>
+                  <TabsList>
+                    <TabsTrigger value="jour">Jour</TabsTrigger>
+                    <TabsTrigger value="semaine">Semaine</TabsTrigger>
+                    <TabsTrigger value="mois">Mois</TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </div>
             </CardHeader>
             <CardContent>
-              {/* En-têtes des jours */}
-              <div className="grid grid-cols-7 gap-0 mb-2">
-                {daysOfWeek.map(day => (
-                  <div
-                    key={day}
-                    className="h-8 flex items-center justify-center text-sm font-medium text-muted-foreground"
-                  >
-                    {day}
-                  </div>
-                ))}
-              </div>
-              
-              {/* Grille du calendrier */}
-              <div className="grid grid-cols-7 gap-0 border border-border rounded-lg overflow-hidden">
-                {renderCalendarDays()}
-              </div>
+              {viewMode === 'jour' && renderDayView()}
+              {viewMode === 'semaine' && renderWeekView()}
+              {viewMode === 'mois' && renderMonthView()}
             </CardContent>
           </Card>
 
@@ -161,11 +555,31 @@ export const Planning: React.FC = () => {
                 <span className="text-sm">Jour travaillé</span>
               </div>
               <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 bg-destructive rounded"></div>
+                <div className="w-4 h-4 bg-blue-100 border border-blue-200 rounded"></div>
+                <span className="text-sm">Mi-temps</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 bg-orange-100 border border-orange-200 rounded"></div>
                 <span className="text-sm">Congé</span>
               </div>
               <div className="flex items-center space-x-3">
-                <div className="w-4 h-4 bg-accent border border-border rounded"></div>
+                <div className="w-4 h-4 bg-gray-100 border border-gray-200 rounded"></div>
+                <span className="text-sm">Jour de repos</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 bg-purple-100 border border-purple-200 rounded"></div>
+                <span className="text-sm">Jour férié</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 bg-red-100 border border-red-200 rounded"></div>
+                <span className="text-sm">Absence maladie</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Coffee className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm">Pause</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 bg-accent border-2 border-primary rounded"></div>
                 <span className="text-sm">Aujourd'hui</span>
               </div>
               
@@ -174,15 +588,19 @@ export const Planning: React.FC = () => {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span>Jours travaillés:</span>
-                    <span className="font-medium">20</span>
+                    <span className="font-medium">18</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Congés pris:</span>
-                    <span className="font-medium">1</span>
+                    <span className="font-medium">2</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Heures prévues:</span>
-                    <span className="font-medium">160h</span>
+                    <span className="font-medium">144h</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Mi-temps:</span>
+                    <span className="font-medium">1</span>
                   </div>
                 </div>
               </div>
@@ -190,34 +608,92 @@ export const Planning: React.FC = () => {
           </Card>
         </div>
 
-        {/* Planning de la semaine */}
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Planning de la semaine</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {['Lundi 15', 'Mardi 16', 'Mercredi 17', 'Jeudi 18', 'Vendredi 19'].map((day, index) => (
-                <div key={day} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                  <div>
-                    <p className="font-medium">{day} Janvier</p>
-                    <p className="text-sm text-muted-foreground">
-                      {index === 4 ? 'Congé' : 'Bureau'}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-medium">
-                      {index === 4 ? 'Jour de congé' : '08:30 - 17:30'}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {index === 4 ? '' : '8h 00m'}
-                    </p>
-                  </div>
+        {/* Modal de détails */}
+        <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>
+                Détails du {selectedDay?.date && new Date(selectedDay.date).toLocaleDateString('fr-FR', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric'
+                })}
+              </DialogTitle>
+            </DialogHeader>
+            {selectedDay && (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Badge className={getTypeColor(selectedDay.type)} variant="secondary">
+                    {getTypeLabel(selectedDay.type)}
+                  </Badge>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                
+                {selectedDay.shifts.length > 0 && (
+                  <div className="space-y-4">
+                    {selectedDay.shifts.map((shift, index) => (
+                      <div key={index} className="p-4 border border-border rounded-lg space-y-3">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Horaires</label>
+                            <p className="flex items-center space-x-1">
+                              <Clock className="h-4 w-4" />
+                              <span>{shift.start} - {shift.end}</span>
+                            </p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Lieu</label>
+                            <p className="flex items-center space-x-1">
+                              <MapPin className="h-4 w-4" />
+                              <span>{shift.location}</span>
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {shift.pauseStart && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Pause</label>
+                            <p className="flex items-center space-x-1">
+                              <Coffee className="h-4 w-4" />
+                              <span>{shift.pauseStart} - {shift.pauseEnd}</span>
+                            </p>
+                          </div>
+                        )}
+                        
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Total</label>
+                          <p className="font-medium">{shift.totalHours}h travaillées</p>
+                        </div>
+                        
+                        {shift.task && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Tâche</label>
+                            <p>{shift.task}</p>
+                          </div>
+                        )}
+                        
+                        {shift.notes && (
+                          <div>
+                            <label className="text-sm font-medium text-muted-foreground">Notes</label>
+                            <p className="text-sm text-muted-foreground">{shift.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {selectedDay.shifts.length === 0 && (
+                  <div className="text-center py-4">
+                    <p className="text-muted-foreground">
+                      Aucun créneau de travail pour cette journée
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );
