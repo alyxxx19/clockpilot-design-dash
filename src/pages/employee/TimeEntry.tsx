@@ -13,7 +13,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTimeEntries } from '@/hooks/useTimeEntries';
 import { useProjects } from '@/hooks/useProjects';
-import { supabase } from '@/lib/supabase';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 
 export const TimeEntry: React.FC = () => {
