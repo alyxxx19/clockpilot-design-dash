@@ -162,20 +162,20 @@ export const Login: React.FC = () => {
                 <Button
                   variant="outline"
                   className="w-full text-sm"
-                  onClick={() => handleDemoLogin('admin_test', 'password123')}
+                  onClick={() => handleDemoLogin('admin@clockpilot.com', 'password123')}
                   disabled={loading}
                 >
                   <Shield className="w-4 h-4 mr-2" />
-                  Compte Admin (admin_test)
+                  Compte Admin (admin@clockpilot.com)
                 </Button>
                 <Button
                   variant="outline"
                   className="w-full text-sm"
-                  onClick={() => handleDemoLogin('employee_test', 'password123')}
+                  onClick={() => handleDemoLogin('employee@clockpilot.com', 'password123')}
                   disabled={loading}
                 >
                   <User className="w-4 h-4 mr-2" />
-                  Compte Employé (employee_test)
+                  Compte Employé (employee@clockpilot.com)
                 </Button>
               </div>
             </div>
