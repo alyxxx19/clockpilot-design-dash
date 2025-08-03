@@ -7,7 +7,7 @@ import {
   Clock,
   LayoutDashboard,
   LogOut,
-  Settings
+  Settings,
   GitCompare
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
