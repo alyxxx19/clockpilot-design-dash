@@ -38,6 +38,7 @@ import {
   type Notification
 } from "@shared/schema";
 import { initializeNotificationService, getNotificationService } from "./notificationService";
+import { ExportService } from "./exportService";
 
 // ============================================================================
 // INTERFACES
@@ -2491,6 +2492,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         error: 'Failed to delete notification',
         code: 'DELETE_NOTIFICATION_ERROR'
+      });
+    }
+  });
+
+  // ========================================
+  // EXPORT ROUTES
+  // ========================================
+  const exportService = new ExportService();
+
+  // Export planning data
+  app.get('/api/planning/export', authenticateToken, authorizeRole(['admin', 'employee']), async (req: AuthRequest, res: Response) => {
+    try {
+      const { format, date_from, date_to, employee_ids } = req.query;
+      
+      if (!format || !['excel', 'pdf'].includes(format as string)) {
+        return res.status(400).json({
+          error: 'Format must be excel or pdf',
+          code: 'INVALID_FORMAT'
+        });
+      }
+
+      // Build query parameters
+      const queryParams: any = {};
+      if (date_from) queryParams.date_from = date_from;
+      if (date_to) queryParams.date_to = date_to;
+      if (employee_ids) queryParams.employee_ids = employee_ids;
+      
+      // For employees, only allow their own data
+      if (req.user!.role === 'employee') {
+        const employee = await storage.getEmployeeByUserId(req.user!.id);
+        if (employee) {
+          queryParams.employee_ids = employee.id;
+        }
+      }
+
+      // Get planning data
+      const planningData = await storage.getPlanningEntries(queryParams);
+      
+      const exportOptions = {
+        format: format as 'excel' | 'pdf',
+        dateRange: date_from && date_to ? {
+          start: date_from as string,
+          end: date_to as string
+        } : undefined,
+        employeeIds: employee_ids ? (Array.isArray(employee_ids) ? employee_ids as string[] : [employee_ids as string]) : undefined
+      };
+
+      const buffer = await exportService.exportPlanning(planningData, exportOptions);
+      
+      const filename = `planning-${format === 'excel' ? 'xlsx' : 'pdf'}-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+      
+      res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+
+    } catch (error) {
+      console.error('Export planning error:', error);
+      res.status(500).json({
+        error: 'Failed to export planning',
+        code: 'EXPORT_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // Export time entries data
+  app.get('/api/time-entries/export', authenticateToken, authorizeRole(['admin', 'employee']), async (req: AuthRequest, res: Response) => {
+    try {
+      const { format, date_from, date_to, employee_ids } = req.query;
+      
+      if (!format || !['excel', 'pdf'].includes(format as string)) {
+        return res.status(400).json({
+          error: 'Format must be excel or pdf',
+          code: 'INVALID_FORMAT'
+        });
+      }
+
+      // Build query parameters
+      const queryParams: any = {};
+      if (date_from) queryParams.date_from = date_from;
+      if (date_to) queryParams.date_to = date_to;
+      if (employee_ids) queryParams.employee_ids = employee_ids;
+      
+      // For employees, only allow their own data
+      if (req.user!.role === 'employee') {
+        const employee = await storage.getEmployeeByUserId(req.user!.id);
+        if (employee) {
+          queryParams.employee_ids = employee.id;
+        }
+      }
+
+      // Get time entries data
+      const timeEntriesData = await storage.getTimeEntries(queryParams);
+      
+      const exportOptions = {
+        format: format as 'excel' | 'pdf',
+        dateRange: date_from && date_to ? {
+          start: date_from as string,
+          end: date_to as string
+        } : undefined,
+        employeeIds: employee_ids ? (Array.isArray(employee_ids) ? employee_ids as string[] : [employee_ids as string]) : undefined
+      };
+
+      const buffer = await exportService.exportTimeEntries(timeEntriesData, exportOptions);
+      
+      const filename = `time-entries-${format === 'excel' ? 'xlsx' : 'pdf'}-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+      
+      res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+
+    } catch (error) {
+      console.error('Export time entries error:', error);
+      res.status(500).json({
+        error: 'Failed to export time entries',
+        code: 'EXPORT_TIME_ENTRIES_ERROR'
+      });
+    }
+  });
+
+  // Export reports data
+  app.get('/api/reports/export', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const { format, type = 'monthly', date_from, date_to } = req.query;
+      
+      if (!format || !['excel', 'pdf'].includes(format as string)) {
+        return res.status(400).json({
+          error: 'Format must be excel or pdf',
+          code: 'INVALID_FORMAT'
+        });
+      }
+
+      // Get employees with their statistics
+      const employees = await storage.getAllEmployees();
+      
+      // Calculate monthly statistics for each employee
+      const reportsData = await Promise.all(employees.map(async (employee) => {
+        const stats = await storage.getEmployeeStats(employee.id);
+        
+        // Calculate additional payroll data
+        const regularHours = Math.min(stats.weeklyHours || 0, 35); // 35h legal weekly limit
+        const overtime25 = Math.max(0, Math.min((stats.weeklyHours || 0) - 35, 8)); // Next 8h at 25%
+        const overtime50 = Math.max(0, (stats.weeklyHours || 0) - 43); // Above 43h at 50%
+        
+        return {
+          ...employee,
+          plannedHours: stats.weeklyHours || 0,
+          workedHours: stats.totalHours || 0,
+          overtimeHours: stats.overtimeHours || 0,
+          workingDays: Math.ceil((stats.totalHours || 0) / 7), // Approximation
+          regularHours,
+          overtime25,
+          overtime50,
+          vacationDays: stats.vacationDays || 0,
+          sickDays: stats.sickDays || 0,
+        };
+      }));
+      
+      const exportOptions = {
+        format: format as 'excel' | 'pdf',
+        dateRange: date_from && date_to ? {
+          start: date_from as string,
+          end: date_to as string
+        } : undefined
+      };
+
+      const buffer = await exportService.exportReports(reportsData, exportOptions);
+      
+      const filename = `reports-${type}-${format === 'excel' ? 'xlsx' : 'pdf'}-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+      
+      res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(buffer);
+
+    } catch (error) {
+      console.error('Export reports error:', error);
+      res.status(500).json({
+        error: 'Failed to export reports',
+        code: 'EXPORT_REPORTS_ERROR'
       });
     }
   });

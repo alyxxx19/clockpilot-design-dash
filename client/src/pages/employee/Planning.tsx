@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 import { useToast } from '@/hooks/use-toast';
+import { ExportButton } from '@/components/ExportButton';
 
 const daysOfWeek = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 const daysOfWeekFull = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
@@ -916,6 +917,34 @@ export const Planning: React.FC = () => {
                 >
                   Aujourd'hui
                 </Button>
+                <ExportButton 
+                  type="planning" 
+                  options={{
+                    dateRange: viewMode === 'mois' ? {
+                      start: new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString().split('T')[0],
+                      end: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).toISOString().split('T')[0]
+                    } : viewMode === 'semaine' ? {
+                      start: (() => {
+                        const startOfWeek = new Date(currentDate);
+                        const day = startOfWeek.getDay();
+                        const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+                        startOfWeek.setDate(diff);
+                        return startOfWeek.toISOString().split('T')[0];
+                      })(),
+                      end: (() => {
+                        const startOfWeek = new Date(currentDate);
+                        const day = startOfWeek.getDay();
+                        const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+                        startOfWeek.setDate(diff + 6);
+                        return startOfWeek.toISOString().split('T')[0];
+                      })()
+                    } : {
+                      start: currentDate.toISOString().split('T')[0],
+                      end: currentDate.toISOString().split('T')[0]
+                    }
+                  }}
+                  className="size-sm"
+                />
               </div>
             </div>
           </CardContent>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AdminSidebar } from '@/components/layouts/AdminSidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ExportButton } from '@/components/ExportButton';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -139,10 +140,22 @@ export const Planning: React.FC = () => {
             <p className="text-muted-foreground mt-1">Gestion des plannings hebdomadaires</p>
           </div>
           
-          <Button onClick={duplicateWeek}>
-            <Copy className="w-4 h-4 mr-2" />
-            Dupliquer la semaine
-          </Button>
+          <div className="flex items-center space-x-2">
+            <ExportButton 
+              type="planning" 
+              options={{
+                dateRange: {
+                  start: new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0],
+                  end: new Date(new Date().setDate(new Date().getDate() + 14)).toISOString().split('T')[0]
+                }
+              }}
+              className="size-sm"
+            />
+            <Button onClick={duplicateWeek}>
+              <Copy className="w-4 h-4 mr-2" />
+              Dupliquer la semaine
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">

@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useToast } from '@/hooks/use-toast';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 import { useNavigate } from 'react-router-dom';
+import { ExportButton } from '@/components/ExportButton';
 
 interface TimeSlot {
   id: string;
@@ -470,6 +471,16 @@ export const TimeEntry: React.FC = () => {
                 <Button variant="outline" size="sm" onClick={goToToday}>
                   Aujourd'hui
                 </Button>
+                <ExportButton 
+                  type="time-entries" 
+                  options={{
+                    dateRange: {
+                      start: selectedDate.toISOString().split('T')[0],
+                      end: selectedDate.toISOString().split('T')[0]
+                    }
+                  }}
+                  className="size-sm"
+                />
               </div>
 
               {/* Intervalle */}
