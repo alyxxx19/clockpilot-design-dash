@@ -179,24 +179,14 @@ export const TimeEntry: React.FC = () => {
 
   // Gérer la sélection d'un créneau
   const handleSlotClick = (slotId: string) => {
-    if (multipleMode) {
-      setSelectedSlots(prev => 
-        prev.includes(slotId) 
-          ? prev.filter(id => id !== slotId)
-          : [...prev, slotId]
-      );
-    } else {
-      // Mode simple : appliquer directement le dernier type sélectionné
-      const slot = timeSlots.find(s => s.id === slotId);
-      if (slot) {
-        const newType = slot.type === 'libre' ? 'travail' : 'libre';
-        const newSlots = timeSlots.map(s => 
-          s.id === slotId ? { ...s, type: newType } : s
-        );
-        saveToHistory(timeSlots);
-        setTimeSlots(newSlots);
-      }
-    }
+    // Dans tous les modes, cliquer sélectionne le créneau
+    setSelectedSlots(prev => 
+      prev.includes(slotId) 
+        ? prev.filter(id => id !== slotId)
+        : multipleMode 
+          ? [...prev, slotId]  // Mode multiple : ajouter à la sélection
+          : [slotId]           // Mode simple : remplacer la sélection
+    );
   };
 
   // Gérer le début du drag
