@@ -90,11 +90,13 @@ export const AdminSidebar: React.FC = () => {
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center">
               <span className="text-sm font-medium text-accent-foreground">
-                {user?.name?.charAt(0) || user?.email?.charAt(0) || 'A'}
+                {user?.employee?.firstName?.charAt(0) || user?.username?.charAt(0) || user?.email?.charAt(0) || 'A'}
               </span>
             </div>
             <div>
-              <p className="text-sm font-medium text-foreground">{user?.name || 'Administrateur'}</p>
+              <p className="text-sm font-medium text-foreground">
+                {user?.employee ? `${user.employee.firstName} ${user.employee.lastName}` : user?.username || 'Administrateur'}
+              </p>
               <p className="text-xs text-muted-foreground">Admin</p>
             </div>
           </div>

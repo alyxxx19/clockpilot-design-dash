@@ -38,12 +38,8 @@ export const Login: React.FC = () => {
           description: "Vous êtes maintenant connecté"
         });
         
-        // Navigate based on user role from API response
-        // The AuthContext will determine the role from the API
-        setTimeout(() => {
-          // Let the auth context update, then navigate
-          window.location.href = '/admin/dashboard'; // Will be redirected based on actual role
-        }, 100);
+        // Navigate to home, let App.tsx redirect based on role  
+        navigate('/', { replace: true });
       } else {
         toast({
           title: "Erreur de connexion",
@@ -76,9 +72,8 @@ export const Login: React.FC = () => {
           description: "Vous êtes connecté avec un compte de démonstration"
         });
         
-        setTimeout(() => {
-          window.location.href = '/admin/dashboard';
-        }, 100);
+        // Navigate to home, let App.tsx redirect based on role
+        navigate('/', { replace: true });
       } else {
         toast({
           title: "Erreur de connexion démo",
