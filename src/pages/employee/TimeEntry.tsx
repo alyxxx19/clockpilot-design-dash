@@ -179,7 +179,6 @@ export const TimeEntry: React.FC = () => {
 
   // Gérer la sélection d'un créneau
   const handleSlotClick = (slotId: string) => {
-    // Dans tous les modes, cliquer sélectionne le créneau
     setSelectedSlots(prev => 
       prev.includes(slotId) 
         ? prev.filter(id => id !== slotId)
@@ -189,37 +188,6 @@ export const TimeEntry: React.FC = () => {
     );
   };
 
-  // Gérer le début du drag
-  const handleMouseDown = (slotId: string) => {
-    if (multipleMode) {
-      setIsDragging(true);
-      setDragStart(slotId);
-      setSelectedSlots([slotId]);
-    }
-  };
-
-  // Gérer le drag
-  const handleMouseEnter = (slotId: string) => {
-    if (isDragging && dragStart && multipleMode) {
-      const startIndex = timeSlots.findIndex(s => s.id === dragStart);
-      const currentIndex = timeSlots.findIndex(s => s.id === slotId);
-      
-      const minIndex = Math.min(startIndex, currentIndex);
-      const maxIndex = Math.max(startIndex, currentIndex);
-      
-      const selectedIds = timeSlots
-        .slice(minIndex, maxIndex + 1)
-        .map(s => s.id);
-      
-      setSelectedSlots(selectedIds);
-    }
-  };
-
-  // Gérer la fin du drag
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    setDragStart(null);
-  };
 
   // Navigation de date
   const navigateDate = (direction: 'prev' | 'next') => {
@@ -419,7 +387,7 @@ export const TimeEntry: React.FC = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6" onMouseUp={handleMouseUp}>
+      <div className="p-6">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground">Saisie des heures</h1>
@@ -644,12 +612,9 @@ export const TimeEntry: React.FC = () => {
                       ${isSelected ? 'border-black ring-2 ring-black ring-opacity-20' : 'border-transparent'}
                       ${slot.type === 'libre' ? 'bg-gray-50 hover:bg-gray-100' : typeConfig?.color}
                       ${isCurrentTime ? 'ring-2 ring-blue-500' : ''}
-                      ${isDragging ? 'select-none' : ''}
                       hover:opacity-80
                     `}
                     onClick={() => handleSlotClick(slot.id)}
-                    onMouseDown={() => handleMouseDown(slot.id)}
-                    onMouseEnter={() => handleMouseEnter(slot.id)}
                   >
                     <div className="font-medium">
                       {slot.start} - {slot.end}
