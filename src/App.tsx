@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 
 // Pages
 import { Landing } from "./pages/Landing";
@@ -20,21 +21,30 @@ import { TimeEntry } from "./pages/employee/TimeEntry";
 import { Tasks } from "./pages/employee/Tasks";
 import { Reports } from "./pages/employee/Reports";
 import { Settings } from "./pages/employee/Settings";
-import { ScheduleComparison } from "./pages/employee/ScheduleComparison";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode; allowedRole?: 'admin' | 'employee' }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
   
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
   
-  if (allowedRole && user?.role !== allowedRole) {
-    return <Navigate to={user?.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard'} replace />;
+  // For this demo, we'll treat all users as employees
+  // In a real app, you'd check user.role
+  if (allowedRole === 'admin') {
+    return <Navigate to="/employee/dashboard" replace />;
   }
   
   return <>{children}</>;
@@ -42,50 +52,29 @@ const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode; 
 
 // App Routes Component
 const AppRoutes = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <Routes>
       <Route path="/" element={isAuthenticated ? 
-        <Navigate to={user?.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard'} replace /> : 
+        <Navigate to="/employee/dashboard" replace /> : 
         <Landing />
       } />
       <Route path="/login" element={isAuthenticated ? 
-        <Navigate to={user?.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard'} replace /> : 
+        <Navigate to="/employee/dashboard" replace /> : 
         <Login />
       } />
       
-      {/* Admin Routes */}
-      <Route path="/admin/dashboard" element={
-        <ProtectedRoute allowedRole="admin">
-          <AdminDashboard />
-        </ProtectedRoute>
-      } />
-      <Route path="/admin/employees" element={
-        <ProtectedRoute allowedRole="admin">
-          <Employees />
-        </ProtectedRoute>
-      } />
-      <Route path="/admin/planning" element={
-        <ProtectedRoute allowedRole="admin">
-          <AdminPlanning />
-        </ProtectedRoute>
-      } />
-      <Route path="/admin/validation" element={
-        <ProtectedRoute allowedRole="admin">
-          <Validation />
-        </ProtectedRoute>
-      } />
-      <Route path="/admin/reports" element={
-        <ProtectedRoute allowedRole="admin">
-          <AdminReports />
-        </ProtectedRoute>
-      } />
-      <Route path="/admin/settings" element={
-        <ProtectedRoute allowedRole="admin">
-          <AdminSettings />
-        </ProtectedRoute>
-      } />
+      {/* Admin Routes - Redirected to employee for demo */}
+      <Route path="/admin/*" element={<Navigate to="/employee/dashboard" replace />} />
       
       {/* Employee Routes */}
       <Route path="/employee/dashboard" element={
@@ -126,17 +115,19 @@ const AppRoutes = () => {
 };
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </TooltipProvider>
-    </AuthProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

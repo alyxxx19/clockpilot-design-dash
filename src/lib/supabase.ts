@@ -1,0 +1,62 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase environment variables');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// Database types
+export interface User {
+  id: string;
+  email: string;
+  full_name: string;
+  avatar_url?: string;
+  department: string;
+  position: string;
+  phone?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimeEntry {
+  id: string;
+  user_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  break_start?: string;
+  break_end?: string;
+  total_hours: number;
+  project: string;
+  notes?: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UserSettings {
+  id: string;
+  user_id: string;
+  email_notifications: boolean;
+  push_notifications: boolean;
+  weekly_reports: boolean;
+  task_deadlines: boolean;
+  theme: 'light' | 'dark' | 'system';
+  language: string;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}

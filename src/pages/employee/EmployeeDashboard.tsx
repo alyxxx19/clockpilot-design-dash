@@ -1,65 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, CheckSquare, BarChart3, Calendar, Play, Pause, Square, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Clock, CheckSquare, BarChart3, Calendar, Play, Pause, Square, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
+import { BreadcrumbNav } from '@/components/ui/breadcrumb-nav';
+import { LoadingState } from '@/components/ui/loading-spinner';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { useTimeEntries } from '@/hooks/useTimeEntries';
+import { supabase } from '@/lib/supabase';
 
-interface Pointage {
-  id: string;
-  type: 'arrivee' | 'pause_debut' | 'pause_fin' | 'depart';
-  timestamp: Date;
-  date: string;
+interface TodayStats {
+  totalMinutes: number;
+  currentStatus: 'not_started' | 'working' | 'on_break' | 'finished';
+  lastAction?: {
+    type: 'clock_in' | 'break_start' | 'break_end' | 'clock_out';
+    time: string;
+  };
 }
-
-interface Shift {
-  start: string;
-  end: string;
-  task: string;
-  department: string;
-}
-
-interface Planning {
-  date: string;
-  shifts: Shift[];
-}
-
-// Données de planning de démonstration
-const mockPlanning: Planning[] = [
-  {
-    date: '2024-01-15',
-    shifts: [
-      { start: '08:30', end: '17:30', task: 'Production A', department: 'Production' }
-    ]
-  },
-  {
-    date: '2024-01-16',
-    shifts: [
-      { start: '08:30', end: '17:30', task: 'Production B', department: 'Production' }
-    ]
-  },
-  {
-    date: '2024-01-17',
-    shifts: [
-      { start: '09:00', end: '18:00', task: 'Formation', department: 'RH' }
-    ]
-  }
-];
 
 export const EmployeeDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  
+  const { user } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [pointages, setPointages] = useState<Pointage[]>([]);
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [planningView, setPlanningView] = useState<'jour' | 'semaine' | 'mois'>('jour');
+  const [todayStats, setTodayStats] = useState<TodayStats>({
+    totalMinutes: 0,
+    currentStatus: 'not_started'
+  });
+  const [weeklyHours, setWeeklyHours] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  // Mise à jour de l'heure en temps réel
+  const today = new Date().toISOString().split('T')[0];
+  const startOfWeek = new Date();
+  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+  const { timeEntries } = useTimeEntries(
+    startOfWeek.toISOString().split('T')[0],
+    endOfWeek.toISOString().split('T')[0]
+  );
+
+  // Update current time every second
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
@@ -68,256 +54,279 @@ export const EmployeeDashboard: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Charger les pointages depuis localStorage
+  // Fetch today's time tracking data
   useEffect(() => {
-    const savedPointages = localStorage.getItem('pointages');
-    if (savedPointages) {
-      const parsed = JSON.parse(savedPointages).map((p: any) => ({
-        ...p,
-        timestamp: new Date(p.timestamp)
-      }));
-      setPointages(parsed);
-    }
-  }, []);
+    const fetchTodayData = async () => {
+      if (!user) return;
 
-  // Sauvegarder les pointages dans localStorage
-  const savePointages = (newPointages: Pointage[]) => {
-    localStorage.setItem('pointages', JSON.stringify(newPointages));
-    setPointages(newPointages);
-  };
+      try {
+        // Get today's time entries
+        const { data: todayEntries } = await supabase
+          .from('time_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .order('created_at', { ascending: false });
 
-  // Obtenir les pointages du jour actuel
-  const getTodayPointages = () => {
-    const today = new Date().toISOString().split('T')[0];
-    return pointages.filter(p => p.date === today);
-  };
-
-  // Déterminer l'état actuel du pointage
-  const getCurrentState = () => {
-    const todayPointages = getTodayPointages();
-    if (todayPointages.length === 0) return 'not_started';
-    
-    const lastPointage = todayPointages[todayPointages.length - 1];
-    switch (lastPointage.type) {
-      case 'arrivee': return 'working';
-      case 'pause_debut': return 'on_break';
-      case 'pause_fin': return 'working';
-      case 'depart': return 'finished';
-      default: return 'not_started';
-    }
-  };
-
-  // Gérer le pointage
-  const handlePointage = (type: Pointage['type']) => {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    
-    const newPointage: Pointage = {
-      id: Date.now().toString(),
-      type,
-      timestamp: now,
-      date: today
-    };
-
-    const newPointages = [...pointages, newPointage];
-    savePointages(newPointages);
-
-    const messages = {
-      arrivee: 'Arrivée pointée',
-      pause_debut: 'Début de pause pointé',
-      pause_fin: 'Reprise pointée',
-      depart: 'Départ pointé'
-    };
-
-    toast({
-      title: messages[type],
-      description: `Pointage effectué à ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
-    });
-  };
-
-  // Naviguer vers les tâches
-  const handleViewAllTasks = () => {
-    navigate('/employee/tasks');
-  };
-
-  // Naviguer vers la saisie d'heures
-  const handleTimeEntry = () => {
-    navigate('/employee/time-entry');
-  };
-
-  // Naviguer vers les rapports
-  const handleViewReports = () => {
-    navigate('/employee/reports');
-  };
-
-  // Naviguer vers le planning
-  const handleViewPlanning = () => {
-    navigate('/employee/planning');
-  };
-
-  // Calculer les heures travaillées aujourd'hui
-  const calculateTodayHours = () => {
-    const todayPointages = getTodayPointages();
-    let totalMinutes = 0;
-    let workStart: Date | null = null;
-    let breakStart: Date | null = null;
-
-    for (const pointage of todayPointages) {
-      switch (pointage.type) {
-        case 'arrivee':
-          workStart = pointage.timestamp;
-          break;
-        case 'pause_debut':
-          if (workStart) {
-            totalMinutes += (pointage.timestamp.getTime() - workStart.getTime()) / (1000 * 60);
+        if (todayEntries && todayEntries.length > 0) {
+          const entry = todayEntries[0];
+          const startTime = new Date(`${entry.date}T${entry.start_time}`);
+          const endTime = entry.end_time ? new Date(`${entry.date}T${entry.end_time}`) : new Date();
+          
+          let totalMinutes = 0;
+          if (entry.status !== 'draft') {
+            totalMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
+            
+            // Subtract break time if applicable
+            if (entry.break_start && entry.break_end) {
+              const breakStart = new Date(`${entry.date}T${entry.break_start}`);
+              const breakEnd = new Date(`${entry.date}T${entry.break_end}`);
+              totalMinutes -= (breakEnd.getTime() - breakStart.getTime()) / (1000 * 60);
+            }
           }
-          breakStart = pointage.timestamp;
-          break;
-        case 'pause_fin':
-          workStart = pointage.timestamp;
-          break;
-        case 'depart':
-          if (workStart) {
-            totalMinutes += (pointage.timestamp.getTime() - workStart.getTime()) / (1000 * 60);
-          }
-          break;
+
+          setTodayStats({
+            totalMinutes: Math.max(0, totalMinutes),
+            currentStatus: entry.end_time ? 'finished' : 'working',
+            lastAction: {
+              type: entry.end_time ? 'clock_out' : 'clock_in',
+              time: entry.end_time || entry.start_time
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching today data:', error);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
 
-    // Si encore en train de travailler, ajouter le temps jusqu'à maintenant
-    const currentState = getCurrentState();
-    if (currentState === 'working' && workStart) {
-      totalMinutes += (currentTime.getTime() - workStart.getTime()) / (1000 * 60);
-    }
+    fetchTodayData();
+  }, [user, today]);
 
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = Math.floor(totalMinutes % 60);
-    return { hours, minutes, totalMinutes };
-  };
+  // Calculate weekly hours
+  useEffect(() => {
+    const total = timeEntries.reduce((sum, entry) => sum + entry.total_hours, 0);
+    setWeeklyHours(total);
+  }, [timeEntries]);
 
-  // Obtenir le planning pour une date donnée
-  const getPlanningForDate = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
-    return mockPlanning.find(p => p.date === dateStr);
-  };
+  const handleClockAction = async (action: 'clock_in' | 'break_start' | 'break_end' | 'clock_out') => {
+    if (!user) return;
 
-  // Vérifier si un créneau est en cours
-  const isShiftActive = (shift: Shift) => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    const selectedDateStr = selectedDate.toISOString().split('T')[0];
-    
-    if (today !== selectedDateStr) return false;
+    const timeString = now.toTimeString().slice(0, 5);
 
-    const [startHour, startMin] = shift.start.split(':').map(Number);
-    const [endHour, endMin] = shift.end.split(':').map(Number);
-    
-    const currentHour = now.getHours();
-    const currentMin = now.getMinutes();
-    const currentTotalMin = currentHour * 60 + currentMin;
-    const startTotalMin = startHour * 60 + startMin;
-    const endTotalMin = endHour * 60 + endMin;
+    try {
+      if (action === 'clock_in') {
+        // Create new time entry
+        const { error } = await supabase
+          .from('time_entries')
+          .insert([{
+            user_id: user.id,
+            date: today,
+            start_time: timeString,
+            total_hours: 0,
+            project: 'Travail général',
+            status: 'draft'
+          }]);
 
-    return currentTotalMin >= startTotalMin && currentTotalMin <= endTotalMin;
-  };
+        if (error) throw error;
 
-  // Naviguer dans le calendrier
-  const navigateDate = (direction: 'prev' | 'next') => {
-    const newDate = new Date(selectedDate);
-    if (planningView === 'jour') {
-      newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 1 : -1));
-    } else if (planningView === 'semaine') {
-      newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 7 : -7));
-    } else {
-      newDate.setMonth(selectedDate.getMonth() + (direction === 'next' ? 1 : -1));
+        setTodayStats(prev => ({
+          ...prev,
+          currentStatus: 'working',
+          lastAction: { type: 'clock_in', time: timeString }
+        }));
+
+        toast({
+          title: "Arrivée pointée",
+          description: `Pointage effectué à ${timeString}`,
+        });
+      } else {
+        // Update existing entry
+        const { data: existingEntry } = await supabase
+          .from('time_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (existingEntry) {
+          const updates: any = {};
+          
+          switch (action) {
+            case 'break_start':
+              updates.break_start = timeString;
+              break;
+            case 'break_end':
+              updates.break_end = timeString;
+              break;
+            case 'clock_out':
+              updates.end_time = timeString;
+              updates.status = 'submitted';
+              
+              // Calculate total hours
+              const startTime = new Date(`${today}T${existingEntry.start_time}`);
+              const endTime = new Date(`${today}T${timeString}`);
+              let totalHours = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
+              
+              // Subtract break time
+              if (existingEntry.break_start && existingEntry.break_end) {
+                const breakStart = new Date(`${today}T${existingEntry.break_start}`);
+                const breakEnd = new Date(`${today}T${existingEntry.break_end}`);
+                totalHours -= (breakEnd.getTime() - breakStart.getTime()) / (1000 * 60 * 60);
+              }
+              
+              updates.total_hours = Math.round(totalHours * 100) / 100;
+              break;
+          }
+
+          const { error } = await supabase
+            .from('time_entries')
+            .update(updates)
+            .eq('id', existingEntry.id);
+
+          if (error) throw error;
+
+          const newStatus = action === 'clock_out' ? 'finished' : 
+                           action === 'break_start' ? 'on_break' : 'working';
+
+          setTodayStats(prev => ({
+            ...prev,
+            currentStatus: newStatus,
+            lastAction: { type: action, time: timeString }
+          }));
+
+          const messages = {
+            break_start: 'Début de pause pointé',
+            break_end: 'Reprise pointée',
+            clock_out: 'Départ pointé'
+          };
+
+          toast({
+            title: messages[action],
+            description: `Pointage effectué à ${timeString}`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Clock action error:', error);
+      toast({
+        title: "Erreur",
+        description: "Impossible d'enregistrer le pointage",
+        variant: "destructive"
+      });
     }
-    setSelectedDate(newDate);
   };
 
-  const currentState = getCurrentState();
-  const todayHours = calculateTodayHours();
-  const todayPlanning = getPlanningForDate(selectedDate);
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="p-6">
+          <LoadingState message="Chargement de votre dashboard..." />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  const todayHours = Math.floor(todayStats.totalMinutes / 60);
+  const todayMinutes = Math.floor(todayStats.totalMinutes % 60);
+  const weeklyProgress = (weeklyHours / 40) * 100;
+  const dailyProgress = (todayStats.totalMinutes / 480) * 100; // 8 hours = 480 minutes
 
   return (
     <DashboardLayout>
       <div className="p-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground">Bienvenue sur votre espace employé</p>
+        <div className="mb-6">
+          <BreadcrumbNav />
         </div>
 
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-foreground">
+            Bonjour {user?.full_name || 'Utilisateur'} 👋
+          </h1>
+          <p className="text-muted-foreground">
+            {currentTime.toLocaleDateString('fr-FR', { 
+              weekday: 'long', 
+              day: 'numeric', 
+              month: 'long' 
+            })}
+          </p>
+        </div>
+
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* Heures du jour */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Heures aujourd'hui</CardTitle>
+              <CardTitle className="text-sm font-medium">Aujourd'hui</CardTitle>
               <Clock className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {todayHours.hours}h {todayHours.minutes.toString().padStart(2, '0')}m
+                {todayHours}h {todayMinutes.toString().padStart(2, '0')}m
               </div>
               <p className="text-xs text-muted-foreground">
                 Objectif: 8h 00m
               </p>
-              <Progress value={(todayHours.totalMinutes / 480) * 100} className="mt-2" />
+              <Progress value={dailyProgress} className="mt-2" />
             </CardContent>
           </Card>
 
-          {/* Tâches en cours */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Tâches en cours</CardTitle>
-              <CheckSquare className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">3</div>
-              <p className="text-xs text-muted-foreground">
-                5 terminées cette semaine
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Heures de la semaine */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Semaine</CardTitle>
+              <CardTitle className="text-sm font-medium">Cette semaine</CardTitle>
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">32h 15m</div>
+              <div className="text-2xl font-bold">{weeklyHours.toFixed(1)}h</div>
               <p className="text-xs text-muted-foreground">
                 Objectif: 40h 00m
               </p>
-              <Progress value={81} className="mt-2" />
+              <Progress value={weeklyProgress} className="mt-2" />
             </CardContent>
           </Card>
 
-          {/* Statut actuel */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Statut</CardTitle>
+              <CardTitle className="text-sm font-medium">Statut actuel</CardTitle>
               <Calendar className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-lg font-bold">
-                {currentState === 'not_started' && 'Non commencé'}
-                {currentState === 'working' && 'En travail'}
-                {currentState === 'on_break' && 'En pause'}
-                {currentState === 'finished' && 'Terminé'}
+                {todayStats.currentStatus === 'not_started' && 'Non commencé'}
+                {todayStats.currentStatus === 'working' && 'En travail'}
+                {todayStats.currentStatus === 'on_break' && 'En pause'}
+                {todayStats.currentStatus === 'finished' && 'Terminé'}
               </div>
               <p className="text-xs text-muted-foreground">
                 {currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
               </p>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Performance</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {weeklyProgress > 100 ? '100+' : Math.round(weeklyProgress)}%
+              </div>
+              <p className="text-xs text-muted-foreground">
+                de l'objectif hebdomadaire
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Pointage rapide */}
+          {/* Quick Actions */}
           <Card>
             <CardHeader>
-              <CardTitle>Pointage rapide</CardTitle>
+              <CardTitle>Actions rapides</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="text-center">
@@ -328,33 +337,33 @@ export const EmployeeDashboard: React.FC = () => {
               </div>
               
               <div className="space-y-2">
-                {currentState === 'not_started' && (
+                {todayStats.currentStatus === 'not_started' && (
                   <Button 
                     className="w-full" 
                     size="lg"
-                    onClick={() => handlePointage('arrivee')}
+                    onClick={() => handleClockAction('clock_in')}
                   >
                     <Play className="mr-2 h-4 w-4" />
                     Pointer l'arrivée
                   </Button>
                 )}
                 
-                {currentState === 'working' && (
+                {todayStats.currentStatus === 'working' && (
                   <>
                     <Button 
                       variant="outline" 
                       className="w-full" 
                       size="lg"
-                      onClick={() => handlePointage('pause_debut')}
+                      onClick={() => handleClockAction('break_start')}
                     >
                       <Pause className="mr-2 h-4 w-4" />
-                      Pointer la pause
+                      Commencer la pause
                     </Button>
                     <Button 
                       variant="secondary" 
                       className="w-full" 
                       size="lg"
-                      onClick={() => handlePointage('depart')}
+                      onClick={() => handleClockAction('clock_out')}
                     >
                       <Square className="mr-2 h-4 w-4" />
                       Pointer le départ
@@ -362,21 +371,21 @@ export const EmployeeDashboard: React.FC = () => {
                   </>
                 )}
                 
-                {currentState === 'on_break' && (
+                {todayStats.currentStatus === 'on_break' && (
                   <>
                     <Button 
                       className="w-full" 
                       size="lg"
-                      onClick={() => handlePointage('pause_fin')}
+                      onClick={() => handleClockAction('break_end')}
                     >
                       <Play className="mr-2 h-4 w-4" />
-                      Reprendre
+                      Reprendre le travail
                     </Button>
                     <Button 
                       variant="secondary" 
                       className="w-full" 
                       size="lg"
-                      onClick={() => handlePointage('depart')}
+                      onClick={() => handleClockAction('clock_out')}
                     >
                       <Square className="mr-2 h-4 w-4" />
                       Pointer le départ
@@ -384,178 +393,109 @@ export const EmployeeDashboard: React.FC = () => {
                   </>
                 )}
                 
-                {currentState === 'finished' && (
+                {todayStats.currentStatus === 'finished' && (
                   <div className="text-center py-4">
-                    <p className="text-muted-foreground">Journée terminée</p>
+                    <Badge className="bg-green-100 text-green-800">
+                      Journée terminée
+                    </Badge>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Dernière action: {todayStats.lastAction?.time}
+                    </p>
                   </div>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Tâches du jour */}
+          {/* Quick Navigation */}
           <Card>
             <CardHeader>
-              <CardTitle>Tâches du jour</CardTitle>
+              <CardTitle>Navigation rapide</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-primary rounded-full"></div>
-                  <span className="flex-1 text-sm">Révision du rapport mensuel</span>
-                  <span className="text-xs text-muted-foreground">En cours</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-muted rounded-full"></div>
-                  <span className="flex-1 text-sm">Réunion équipe - 14h30</span>
-                  <span className="text-xs text-muted-foreground">À venir</span>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-muted rounded-full"></div>
-                  <span className="flex-1 text-sm">Formation sécurité</span>
-                  <span className="text-xs text-muted-foreground">À venir</span>
-                </div>
-              </div>
+            <CardContent className="space-y-3">
               <Button 
                 variant="outline" 
-                className="w-full mt-4 transition-colors hover:bg-accent"
-                onClick={handleViewAllTasks}
+                className="w-full justify-start"
+                onClick={() => navigate('/employee/time-entry')}
               >
-                Voir toutes les tâches
+                <Clock className="mr-2 h-4 w-4" />
+                Saisie détaillée des heures
+              </Button>
+              
+              <Button 
+                variant="outline" 
+                className="w-full justify-start"
+                onClick={() => navigate('/employee/planning')}
+              >
+                <Calendar className="mr-2 h-4 w-4" />
+                Consulter mon planning
+              </Button>
+              
+              <Button 
+                variant="outline" 
+                className="w-full justify-start"
+                onClick={() => navigate('/employee/reports')}
+              >
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Voir mes rapports
+              </Button>
+              
+              <Button 
+                variant="outline" 
+                className="w-full justify-start"
+                onClick={() => navigate('/employee/tasks')}
+              >
+                <CheckSquare className="mr-2 h-4 w-4" />
+                Gérer mes tâches
               </Button>
             </CardContent>
           </Card>
 
-          {/* Widget Planning */}
+          {/* Recent Activity */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                Mon Planning
-                <div className="flex items-center space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigateDate('prev')}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigateDate('next')}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardTitle>
+              <CardTitle>Activité récente</CardTitle>
             </CardHeader>
             <CardContent>
-              <Tabs value={planningView} onValueChange={(value) => setPlanningView(value as any)}>
-                <TabsList className="grid w-full grid-cols-3 mb-4">
-                  <TabsTrigger value="jour">Jour</TabsTrigger>
-                  <TabsTrigger value="semaine">Semaine</TabsTrigger>
-                  <TabsTrigger value="mois">Mois</TabsTrigger>
-                </TabsList>
-                
-                <div className="space-y-3">
-                  <div className="text-center">
-                    <p className="font-medium">
-                      {selectedDate.toLocaleDateString('fr-FR', {
-                        weekday: 'long',
-                        day: 'numeric',
-                        month: 'long'
-                      })}
-                    </p>
-                    {selectedDate.toDateString() === new Date().toDateString() && (
-                      <Badge variant="secondary" className="mt-1">Aujourd'hui</Badge>
-                    )}
+              <div className="space-y-3">
+                {timeEntries.slice(0, 5).map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {new Date(entry.date).toLocaleDateString('fr-FR')}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {entry.start_time} - {entry.end_time || 'En cours'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium">{entry.total_hours}h</p>
+                      <Badge 
+                        variant={
+                          entry.status === 'approved' ? 'default' :
+                          entry.status === 'submitted' ? 'secondary' :
+                          entry.status === 'rejected' ? 'destructive' : 'outline'
+                        }
+                        className="text-xs"
+                      >
+                        {entry.status === 'approved' && 'Validé'}
+                        {entry.status === 'submitted' && 'Soumis'}
+                        {entry.status === 'rejected' && 'Rejeté'}
+                        {entry.status === 'draft' && 'Brouillon'}
+                      </Badge>
+                    </div>
                   </div>
-                  
-                  {todayPlanning ? (
-                    <div className="space-y-2">
-                      {todayPlanning.shifts.map((shift, index) => (
-                        <div 
-                          key={index}
-                          className={`p-3 rounded-lg border transition-colors ${
-                            isShiftActive(shift) 
-                              ? 'bg-primary text-primary-foreground border-primary' 
-                              : 'bg-card border-border'
-                          }`}
-                        >
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="font-medium text-sm">{shift.task}</p>
-                              <p className={`text-xs ${
-                                isShiftActive(shift) ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                              }`}>
-                                {shift.department}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-medium text-sm">
-                                {shift.start} - {shift.end}
-                              </p>
-                              {isShiftActive(shift) && (
-                                <Badge variant="secondary" className="mt-1">
-                                  En cours
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4">
-                      <p className="text-muted-foreground text-sm">Aucun créneau planifié</p>
-                    </div>
-                  )}
-                </div>
-              </Tabs>
+                ))}
+                
+                {timeEntries.length === 0 && (
+                  <div className="text-center py-4">
+                    <p className="text-muted-foreground text-sm">Aucune activité récente</p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
-
-        {/* Historique récent */}
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Historique récent</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {getTodayPointages().slice(-5).reverse().map((pointage) => (
-                <div key={pointage.id} className="flex items-center justify-between py-2 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">
-                      {pointage.type === 'arrivee' && 'Arrivée'}
-                      {pointage.type === 'pause_debut' && 'Début de pause'}
-                      {pointage.type === 'pause_fin' && 'Reprise'}
-                      {pointage.type === 'depart' && 'Départ'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {pointage.timestamp.toLocaleDateString('fr-FR') === new Date().toLocaleDateString('fr-FR') 
-                        ? 'Aujourd\'hui' 
-                        : pointage.timestamp.toLocaleDateString('fr-FR')
-                      }
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium">
-                      {pointage.timestamp.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Bureau</p>
-                  </div>
-                </div>
-              ))}
-              
-              {getTodayPointages().length === 0 && (
-                <div className="text-center py-4">
-                  <p className="text-muted-foreground text-sm">Aucun pointage aujourd'hui</p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </DashboardLayout>
   );

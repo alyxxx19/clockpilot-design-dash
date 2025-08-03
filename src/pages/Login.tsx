@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Clock, Shield, User } from 'lucide-react';
+import { Clock, User, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useAuth, UserRole } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(false);
   
   const { login } = useAuth();
@@ -20,10 +19,11 @@ export const Login: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRole) {
+    
+    if (!email || !password) {
       toast({
         title: "Erreur",
-        description: "Veuillez sélectionner un rôle",
+        description: "Veuillez remplir tous les champs",
         variant: "destructive"
       });
       return;
@@ -31,13 +31,13 @@ export const Login: React.FC = () => {
 
     setLoading(true);
     try {
-      const success = await login(email, password, selectedRole);
+      const success = await login(email, password);
       if (success) {
         toast({
           title: "Connexion réussie",
           description: "Vous êtes maintenant connecté"
         });
-        navigate(selectedRole === 'admin' ? '/admin/dashboard' : '/employee/dashboard');
+        navigate('/employee/dashboard');
       } else {
         toast({
           title: "Erreur de connexion",
@@ -48,7 +48,7 @@ export const Login: React.FC = () => {
     } catch (error) {
       toast({
         title: "Erreur",
-        description: "Une erreur est survenue",
+        description: "Une erreur est survenue lors de la connexion",
         variant: "destructive"
       });
     } finally {
@@ -56,10 +56,9 @@ export const Login: React.FC = () => {
     }
   };
 
-  const handleDemoLogin = (demoEmail: string, role: UserRole) => {
-    setEmail(demoEmail);
-    setPassword('demo');
-    setSelectedRole(role);
+  const handleDemoLogin = () => {
+    setEmail('demo@clockpilot.com');
+    setPassword('demo123');
   };
 
   return (
@@ -76,42 +75,13 @@ export const Login: React.FC = () => {
           <p className="mt-2 text-muted-foreground">Connectez-vous à votre espace</p>
         </div>
 
-        {/* Role Selection */}
-        <div className="space-y-4">
-          <Label className="text-base font-medium">Choisissez votre rôle</Label>
-          <div className="grid grid-cols-2 gap-4">
-            <Card 
-              className={`cursor-pointer transition-all hover:shadow-md ${
-                selectedRole === 'admin' ? 'ring-2 ring-primary bg-accent' : ''
-              }`}
-              onClick={() => setSelectedRole('admin')}
-            >
-              <CardContent className="p-4 text-center">
-                <Shield className="w-8 h-8 mx-auto mb-2 text-foreground" />
-                <h3 className="font-medium text-card-foreground">Administrateur</h3>
-                <p className="text-sm text-muted-foreground mt-1">Gestion complète</p>
-              </CardContent>
-            </Card>
-
-            <Card 
-              className={`cursor-pointer transition-all hover:shadow-md ${
-                selectedRole === 'employee' ? 'ring-2 ring-primary bg-accent' : ''
-              }`}
-              onClick={() => setSelectedRole('employee')}
-            >
-              <CardContent className="p-4 text-center">
-                <User className="w-8 h-8 mx-auto mb-2 text-foreground" />
-                <h3 className="font-medium text-card-foreground">Employé</h3>
-                <p className="text-sm text-muted-foreground mt-1">Saisie des heures</p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
         {/* Login Form */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-center">Connexion</CardTitle>
+            <CardTitle className="text-center flex items-center justify-center space-x-2">
+              <User className="w-5 h-5" />
+              <span>Connexion Employé</span>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
@@ -144,31 +114,33 @@ export const Login: React.FC = () => {
               <Button 
                 type="submit" 
                 className="w-full" 
-                disabled={loading || !selectedRole}
+                disabled={loading}
               >
-                {loading ? 'Connexion...' : 'Se connecter'}
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Connexion...
+                  </>
+                ) : (
+                  'Se connecter'
+                )}
               </Button>
             </form>
 
-            {/* Demo Buttons */}
+            {/* Demo Account */}
             <div className="mt-6 space-y-2">
-              <p className="text-sm text-muted-foreground text-center">Comptes de démonstration :</p>
-              <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  className="w-full text-sm"
-                  onClick={() => handleDemoLogin('demo-admin@clockpilot.com', 'admin')}
-                >
-                  demo-admin@clockpilot.com
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full text-sm"
-                  onClick={() => handleDemoLogin('demo-employee@clockpilot.com', 'employee')}
-                >
-                  demo-employee@clockpilot.com
-                </Button>
-              </div>
+              <p className="text-sm text-muted-foreground text-center">Compte de démonstration :</p>
+              <Button
+                variant="outline"
+                className="w-full text-sm"
+                onClick={handleDemoLogin}
+                disabled={loading}
+              >
+                Utiliser le compte démo
+              </Button>
+              <p className="text-xs text-muted-foreground text-center">
+                Email: demo@clockpilot.com | Mot de passe: demo123
+              </p>
             </div>
           </CardContent>
         </Card>
