@@ -82,6 +82,7 @@ export const TimeEntry: React.FC = () => {
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Générer les créneaux horaires
   const generateTimeSlots = useCallback(() => {
@@ -206,6 +207,10 @@ export const TimeEntry: React.FC = () => {
   // Aller à aujourd'hui
   const goToToday = () => {
     setSelectedDate(new Date());
+    toast({
+      title: "Navigation",
+      description: "Retour à la date d'aujourd'hui",
+    });
   };
 
   // Annuler/Refaire
@@ -354,6 +359,46 @@ export const TimeEntry: React.FC = () => {
       title: "Heures sauvegardées",
       description: "Votre planning a été enregistré avec succès",
     });
+  };
+
+  // Soumettre pour validation
+  const submitForValidation = () => {
+    const totaux = calculateTotals(timeSlots);
+    
+    if (totaux.travail === 0) {
+      toast({
+        title: "Erreur",
+        description: "Aucune heure de travail saisie",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const dayPlanning: DayPlanning = {
+      employeeId: 'current-user',
+      date: selectedDate.toISOString().split('T')[0],
+      creneaux: timeSlots,
+      totaux,
+      status: 'soumis',
+      dateModification: Date.now()
+    };
+
+    localStorage.setItem(`timeEntry-${dayPlanning.date}`, JSON.stringify(dayPlanning));
+    
+    toast({
+      title: "Soumis pour validation",
+      description: "Vos heures ont été soumises à votre superviseur",
+    });
+  };
+
+  // Naviguer vers les rapports
+  const handleViewReports = () => {
+    navigate('/employee/reports');
+  };
+
+  // Naviguer vers le planning
+  const handleViewPlanning = () => {
+    navigate('/employee/planning');
   };
 
   // Raccourcis clavier
@@ -737,19 +782,50 @@ export const TimeEntry: React.FC = () => {
                     )}
                   </div>
                 </div>
+                <div className="pt-2 border-t border-border">
+                  <div className="flex space-x-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={handleViewPlanning}
+                    >
+                      Planning
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex-1"
+                      onClick={handleViewReports}
+                    >
+                      Rapports
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Bouton de sauvegarde flottant */}
-        <Button
-          className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg"
-          size="lg"
-          onClick={saveTimeEntry}
-        >
-          <Save className="h-6 w-6" />
-        </Button>
+        <div className="fixed bottom-6 right-6 space-y-2">
+          <Button
+            className="h-14 w-14 rounded-full shadow-lg"
+            size="lg"
+            onClick={submitForValidation}
+            disabled={totaux.travail === 0}
+          >
+            <Check className="h-6 w-6" />
+          </Button>
+          <Button
+            variant="outline"
+            className="h-12 w-12 rounded-full shadow-lg"
+            size="lg"
+            onClick={saveTimeEntry}
+          >
+            <Save className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
     </DashboardLayout>
   );

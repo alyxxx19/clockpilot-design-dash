@@ -140,6 +140,21 @@ export const EmployeeDashboard: React.FC = () => {
     navigate('/employee/tasks');
   };
 
+  // Naviguer vers la saisie d'heures
+  const handleTimeEntry = () => {
+    navigate('/employee/time-entry');
+  };
+
+  // Naviguer vers les rapports
+  const handleViewReports = () => {
+    navigate('/employee/reports');
+  };
+
+  // Naviguer vers le planning
+  const handleViewPlanning = () => {
+    navigate('/employee/planning');
+  };
+
   // Calculer les heures travaillées aujourd'hui
   const calculateTodayHours = () => {
     const todayPointages = getTodayPointages();

@@ -79,6 +79,28 @@ export const Settings: React.FC = () => {
     });
   };
 
+  // Réinitialiser les préférences
+  const handleResetPreferences = () => {
+    setNotifications({
+      emailReminders: true,
+      pushNotifications: true,
+      weeklyReports: false,
+      taskDeadlines: true
+    });
+    toast({
+      title: "Préférences réinitialisées",
+      description: "Les paramètres par défaut ont été restaurés",
+    });
+  };
+
+  // Exporter les données
+  const handleExportData = () => {
+    toast({
+      title: "Export en cours",
+      description: "Vos données personnelles sont en cours d'export",
+    });
+  };
+
   return (
     <DashboardLayout>
       <div className="p-6">
@@ -292,7 +314,8 @@ export const Settings: React.FC = () => {
             <CardTitle>Informations du compte</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
               <div>
                 <p className="text-muted-foreground">Type de compte</p>
                 <p className="font-medium">Employé</p>
@@ -310,6 +333,18 @@ export const Settings: React.FC = () => {
                 <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
                   Actif
                 </span>
+              </div>
+            </div>
+              
+              <div className="pt-4 border-t border-border">
+                <div className="flex space-x-2">
+                  <Button variant="outline" onClick={handleResetPreferences}>
+                    Réinitialiser les préférences
+                  </Button>
+                  <Button variant="outline" onClick={handleExportData}>
+                    Exporter mes données
+                  </Button>
+                </div>
               </div>
             </div>
           </CardContent>

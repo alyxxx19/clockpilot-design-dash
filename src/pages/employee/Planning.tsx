@@ -244,6 +244,7 @@ export const Planning: React.FC = () => {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
+  const { toast } = useToast();
 
   const getDaysInMonth = (date: Date) => {
     return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -333,6 +334,20 @@ export const Planning: React.FC = () => {
   const handleDayClick = (day: PlanningDay) => {
     setSelectedDay(day);
     setIsDetailModalOpen(true);
+  };
+
+  // Aller à aujourd'hui
+  const goToToday = () => {
+    setSelectedDate(new Date());
+    toast({
+      title: "Navigation",
+      description: "Retour à la date d'aujourd'hui",
+    });
+  };
+
+  // Naviguer vers la saisie d'heures
+  const handleTimeEntry = () => {
+    navigate('/employee/time-entry');
   };
 
   const renderTimeSlot = (slot: PlanningShift, isAdmin: boolean) => {
@@ -472,7 +487,7 @@ export const Planning: React.FC = () => {
                   <div className="text-center py-8">
                     <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
                     <p className="text-muted-foreground">Aucune heure saisie pour cette journée</p>
-                    <Button className="mt-4" size="sm">
+                    <Button className="mt-4" size="sm" onClick={handleTimeEntry}>
                       Saisir mes heures
                     </Button>
                   </div>
@@ -886,6 +901,13 @@ export const Planning: React.FC = () => {
                     <Label>Légende</Label>
                   </div>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToToday}
+                >
+                  Aujourd'hui
+                </Button>
               </div>
             </div>
           </CardContent>

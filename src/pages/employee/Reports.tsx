@@ -37,6 +37,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
+import { useNavigate } from 'react-router-dom';
 
 // Types de données
 interface DayData {
@@ -153,6 +154,7 @@ export const Reports: React.FC = () => {
   const itemsPerPage = 10;
   
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Calculs des statistiques principales
   const totalHours = mockDayData.reduce((sum, day) => sum + day.travailEffectif, 0);
@@ -178,6 +180,33 @@ export const Reports: React.FC = () => {
     toast({
       title: "Email envoyé",
       description: "Le rapport a été envoyé à votre adresse email",
+    });
+  };
+
+  // Naviguer vers la saisie d'heures
+  const handleTimeEntry = () => {
+    navigate('/employee/time-entry');
+  };
+
+  // Naviguer vers le planning
+  const handleViewPlanning = () => {
+    navigate('/employee/planning');
+  };
+
+  // Voir les détails d'une journée
+  const handleViewDay = (day: DayData) => {
+    toast({
+      title: "Détails du jour",
+      description: `Affichage des détails pour le ${new Date(day.date).toLocaleDateString('fr-FR')}`,
+    });
+  };
+
+  // Éditer une journée
+  const handleEditDay = (day: DayData) => {
+    navigate('/employee/time-entry');
+    toast({
+      title: "Édition",
+      description: "Redirection vers la saisie d'heures",
     });
   };
 
@@ -692,10 +721,10 @@ export const Reports: React.FC = () => {
                         <TableCell>{getStatusBadge(day.statut)}</TableCell>
                         <TableCell>
                           <div className="flex space-x-1">
-                            <Button variant="ghost" size="sm">
+                            <Button variant="ghost" size="sm" onClick={() => handleViewDay(day)}>
                               <Eye className="w-4 h-4" />
                             </Button>
-                            <Button variant="ghost" size="sm">
+                            <Button variant="ghost" size="sm" onClick={() => handleEditDay(day)}>
                               <Edit className="w-4 h-4" />
                             </Button>
                           </div>
@@ -805,7 +834,17 @@ export const Reports: React.FC = () => {
                 </div>
                 
                 <div className="pt-4 border-t border-border text-xs text-muted-foreground">
-                  <p>💡 Conseil : Essayez d'arriver 15min plus tôt pour améliorer votre ponctualité</p>
+                  <div className="space-y-2">
+                    <p>💡 Conseil : Essayez d'arriver 15min plus tôt pour améliorer votre ponctualité</p>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="w-full text-xs"
+                      onClick={handleViewPlanning}
+                    >
+                      Voir mon planning
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
