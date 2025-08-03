@@ -11,7 +11,6 @@ import { useToast } from '@/hooks/use-toast';
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(false);
   
   const { login } = useAuth();
@@ -20,10 +19,11 @@ export const Login: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRole) {
+
+    if (!email || !password) {
       toast({
         title: "Erreur",
-        description: "Veuillez sélectionner un rôle",
+        description: "Veuillez remplir tous les champs",
         variant: "destructive"
       });
       return;
@@ -31,24 +31,30 @@ export const Login: React.FC = () => {
 
     setLoading(true);
     try {
-      const success = await login(email, password, selectedRole);
-      if (success) {
+      const result = await login(email, password);
+      if (result.success) {
         toast({
           title: "Connexion réussie",
           description: "Vous êtes maintenant connecté"
         });
-        navigate(selectedRole === 'admin' ? '/admin/dashboard' : '/employee/dashboard');
+        
+        // Navigate based on user role from API response
+        // The AuthContext will determine the role from the API
+        setTimeout(() => {
+          // Let the auth context update, then navigate
+          window.location.href = '/admin/dashboard'; // Will be redirected based on actual role
+        }, 100);
       } else {
         toast({
           title: "Erreur de connexion",
-          description: "Email ou mot de passe incorrect",
+          description: result.error || "Email ou mot de passe incorrect",
           variant: "destructive"
         });
       }
     } catch (error) {
       toast({
         title: "Erreur",
-        description: "Une erreur est survenue",
+        description: "Une erreur inattendue est survenue",
         variant: "destructive"
       });
     } finally {
@@ -56,10 +62,39 @@ export const Login: React.FC = () => {
     }
   };
 
-  const handleDemoLogin = (demoEmail: string, role: UserRole) => {
+  const handleDemoLogin = async (demoEmail: string, demoPassword: string) => {
     setEmail(demoEmail);
-    setPassword('demo');
-    setSelectedRole(role);
+    setPassword(demoPassword);
+    
+    // Auto-submit the form for demo login
+    setLoading(true);
+    try {
+      const result = await login(demoEmail, demoPassword);
+      if (result.success) {
+        toast({
+          title: "Connexion démo réussie",
+          description: "Vous êtes connecté avec un compte de démonstration"
+        });
+        
+        setTimeout(() => {
+          window.location.href = '/admin/dashboard';
+        }, 100);
+      } else {
+        toast({
+          title: "Erreur de connexion démo",
+          description: result.error || "Impossible de se connecter avec le compte démo",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Erreur",
+        description: "Erreur lors de la connexion démo",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -76,37 +111,7 @@ export const Login: React.FC = () => {
           <p className="mt-2 text-muted-foreground">Connectez-vous à votre espace</p>
         </div>
 
-        {/* Role Selection */}
-        <div className="space-y-4">
-          <Label className="text-base font-medium">Choisissez votre rôle</Label>
-          <div className="grid grid-cols-2 gap-4">
-            <Card 
-              className={`cursor-pointer transition-all hover:shadow-md ${
-                selectedRole === 'admin' ? 'ring-2 ring-primary bg-accent' : ''
-              }`}
-              onClick={() => setSelectedRole('admin')}
-            >
-              <CardContent className="p-4 text-center">
-                <Shield className="w-8 h-8 mx-auto mb-2 text-foreground" />
-                <h3 className="font-medium text-card-foreground">Administrateur</h3>
-                <p className="text-sm text-muted-foreground mt-1">Gestion complète</p>
-              </CardContent>
-            </Card>
 
-            <Card 
-              className={`cursor-pointer transition-all hover:shadow-md ${
-                selectedRole === 'employee' ? 'ring-2 ring-primary bg-accent' : ''
-              }`}
-              onClick={() => setSelectedRole('employee')}
-            >
-              <CardContent className="p-4 text-center">
-                <User className="w-8 h-8 mx-auto mb-2 text-foreground" />
-                <h3 className="font-medium text-card-foreground">Employé</h3>
-                <p className="text-sm text-muted-foreground mt-1">Saisie des heures</p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
 
         {/* Login Form */}
         <Card>
@@ -144,7 +149,7 @@ export const Login: React.FC = () => {
               <Button 
                 type="submit" 
                 className="w-full" 
-                disabled={loading || !selectedRole}
+                disabled={loading}
               >
                 {loading ? 'Connexion...' : 'Se connecter'}
               </Button>
@@ -157,16 +162,20 @@ export const Login: React.FC = () => {
                 <Button
                   variant="outline"
                   className="w-full text-sm"
-                  onClick={() => handleDemoLogin('demo-admin@clockpilot.com', 'admin')}
+                  onClick={() => handleDemoLogin('admin_test', 'password123')}
+                  disabled={loading}
                 >
-                  demo-admin@clockpilot.com
+                  <Shield className="w-4 h-4 mr-2" />
+                  Compte Admin (admin_test)
                 </Button>
                 <Button
                   variant="outline"
                   className="w-full text-sm"
-                  onClick={() => handleDemoLogin('demo-employee@clockpilot.com', 'employee')}
+                  onClick={() => handleDemoLogin('employee_test', 'password123')}
+                  disabled={loading}
                 >
-                  demo-employee@clockpilot.com
+                  <User className="w-4 h-4 mr-2" />
+                  Compte Employé (employee_test)
                 </Button>
               </div>
             </div>
