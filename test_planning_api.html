@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClockPilot Planning API Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background: #f5f5f5;
+        }
+        .container { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px; 
+        }
+        .grid-3 { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr 1fr; 
+            gap: 15px; 
+        }
+        .form-group { 
+            margin-bottom: 15px; 
+        }
+        label { 
+            display: block; 
+            margin-bottom: 5px; 
+            font-weight: bold;
+        }
+        input, select, textarea { 
+            width: 100%; 
+            padding: 8px 12px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            box-sizing: border-box;
+        }
+        button { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover { 
+            background: #0056b3; 
+        }
+        button.success { 
+            background: #28a745; 
+        }
+        button.success:hover { 
+            background: #218838; 
+        }
+        button.warning { 
+            background: #ffc107; 
+            color: #212529;
+        }
+        button.warning:hover { 
+            background: #e0a800; 
+        }
+        button.danger { 
+            background: #dc3545; 
+        }
+        button.danger:hover { 
+            background: #c82333; 
+        }
+        .success { 
+            background: #d4edda; 
+            color: #155724; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+        }
+        .error { 
+            background: #f8d7da; 
+            color: #721c24; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+        }
+        .warning { 
+            background: #fff3cd; 
+            color: #856404; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+        }
+        .response { 
+            background: #f8f9fa; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0; 
+            white-space: pre-wrap; 
+            font-family: monospace;
+            border-left: 4px solid #007bff;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        h2 { 
+            color: #333; 
+            border-bottom: 2px solid #007bff; 
+            padding-bottom: 10px;
+        }
+        .planning-entry {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+        .planning-entry h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .flex {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-draft { background: #e9ecef; color: #495057; }
+        .status-submitted { background: #cff4fc; color: #055160; }
+        .status-validated { background: #d1e7dd; color: #0f5132; }
+        .status-rejected { background: #f8d7da; color: #721c24; }
+        .conflict-error { background: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+        .conflict-warning { background: #fff3cd; color: #856404; border-left: 4px solid #ffc107; }
+        .bulk-entry {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+    </style>
+</head>
+<body>
+    <h1>📅 ClockPilot Planning API Test</h1>
+    
+    <!-- Auth Token -->
+    <div class="container">
+        <h2>🔑 Authentication</h2>
+        <div class="form-group">
+            <label for="authToken">Access Token:</label>
+            <input type="text" id="authToken" placeholder="Bearer token from login">
+        </div>
+        <button onclick="testAuthUser()">Test Token (Get Current User)</button>
+        <div id="authResponse"></div>
+    </div>
+
+    <div class="grid">
+        <!-- Get Planning -->
+        <div class="container">
+            <h2>📋 Get Planning Entries</h2>
+            <div class="form-group">
+                <label for="planningStartDate">Start Date:</label>
+                <input type="date" id="planningStartDate" required>
+            </div>
+            <div class="form-group">
+                <label for="planningEndDate">End Date:</label>
+                <input type="date" id="planningEndDate" required>
+            </div>
+            <div class="form-group">
+                <label for="planningEmployeeId">Employee ID (optional):</label>
+                <input type="number" id="planningEmployeeId" placeholder="Leave empty for all">
+            </div>
+            <div class="form-group">
+                <label for="planningDepartmentId">Department ID (optional):</label>
+                <input type="number" id="planningDepartmentId" placeholder="Leave empty for all">
+            </div>
+            <button onclick="getPlanningEntries()">Get Planning</button>
+            <div id="planningResponse"></div>
+        </div>
+
+        <!-- Weekly Planning -->
+        <div class="container">
+            <h2>📊 Weekly Planning</h2>
+            <div class="form-group">
+                <label for="weeklyEmployeeId">Employee ID:</label>
+                <input type="number" id="weeklyEmployeeId" required>
+            </div>
+            <div class="form-group">
+                <label for="weekStart">Week Start (Monday):</label>
+                <input type="date" id="weekStart" required>
+            </div>
+            <button onclick="getWeeklyPlanning()">Get Weekly Planning</button>
+            <div id="weeklyResponse"></div>
+        </div>
+    </div>
+
+    <!-- Generate Planning -->
+    <div class="container">
+        <h2>⚡ Generate Planning (Admin Only)</h2>
+        <div class="grid-3">
+            <div class="form-group">
+                <label for="generateStartDate">Start Date:</label>
+                <input type="date" id="generateStartDate" required>
+            </div>
+            <div class="form-group">
+                <label for="generateEndDate">End Date:</label>
+                <input type="date" id="generateEndDate" required>
+            </div>
+            <div class="form-group">
+                <label for="generateDepartmentId">Department ID (optional):</label>
+                <input type="number" id="generateDepartmentId" placeholder="Leave empty for all">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="generateEmployeeIds">Employee IDs (comma-separated, optional):</label>
+            <input type="text" id="generateEmployeeIds" placeholder="e.g., 1,2,3">
+        </div>
+        <button class="success" onclick="generatePlanning()">Generate Planning</button>
+        <div id="generateResponse"></div>
+    </div>
+
+    <!-- Update Planning Entry -->
+    <div class="container">
+        <h2>✏️ Update Planning Entry</h2>
+        <div class="grid">
+            <div>
+                <div class="form-group">
+                    <label for="updatePlanningId">Planning Entry ID:</label>
+                    <input type="number" id="updatePlanningId" required>
+                </div>
+                <div class="form-group">
+                    <label for="updateDate">Date:</label>
+                    <input type="date" id="updateDate">
+                </div>
+                <div class="form-group">
+                    <label for="updateStartTime">Start Time:</label>
+                    <input type="time" id="updateStartTime">
+                </div>
+                <div class="form-group">
+                    <label for="updateEndTime">End Time:</label>
+                    <input type="time" id="updateEndTime">
+                </div>
+            </div>
+            <div>
+                <div class="form-group">
+                    <label for="updateType">Type:</label>
+                    <select id="updateType">
+                        <option value="">Keep current</option>
+                        <option value="work">Work</option>
+                        <option value="vacation">Vacation</option>
+                        <option value="sick">Sick</option>
+                        <option value="training">Training</option>
+                        <option value="meeting">Meeting</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="updateStatus">Status:</label>
+                    <select id="updateStatus">
+                        <option value="">Keep current</option>
+                        <option value="draft">Draft</option>
+                        <option value="submitted">Submitted</option>
+                        <option value="validated">Validated</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="updateNotes">Notes:</label>
+                    <textarea id="updateNotes" rows="3"></textarea>
+                </div>
+            </div>
+        </div>
+        <button onclick="updatePlanningEntry()">Update Entry</button>
+        <div id="updateResponse"></div>
+    </div>
+
+    <!-- Bulk Operations -->
+    <div class="container">
+        <h2>📦 Bulk Planning Operations (Admin Only)</h2>
+        <div class="form-group">
+            <label>Bulk Entries (JSON format):</label>
+            <textarea id="bulkEntries" rows="10" placeholder='[
+  {
+    "employee_id": 1,
+    "date": "2025-08-04",
+    "start_time": "09:00",
+    "end_time": "17:00",
+    "type": "work",
+    "notes": "Regular shift"
+  },
+  {
+    "employee_id": 1,
+    "date": "2025-08-05",
+    "start_time": "09:00",
+    "end_time": "17:00",
+    "type": "work",
+    "notes": "Regular shift"
+  }
+]'></textarea>
+        </div>
+        <button class="warning" onclick="bulkPlanningOperation()">Execute Bulk Operation</button>
+        <div id="bulkResponse"></div>
+    </div>
+
+    <div class="grid">
+        <!-- Validate Planning -->
+        <div class="container">
+            <h2>✅ Validate Planning (Admin Only)</h2>
+            <div class="form-group">
+                <label for="validateEmployeeId">Employee ID:</label>
+                <input type="number" id="validateEmployeeId" required>
+            </div>
+            <div class="form-group">
+                <label for="validateWeekStart">Week Start:</label>
+                <input type="date" id="validateWeekStart" required>
+            </div>
+            <div class="form-group">
+                <label for="validateStatus">Status:</label>
+                <select id="validateStatus" required>
+                    <option value="pending">Pending</option>
+                    <option value="validated">Validated</option>
+                    <option value="rejected">Rejected</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="validateComments">Comments:</label>
+                <textarea id="validateComments" rows="3"></textarea>
+            </div>
+            <button class="success" onclick="validatePlanning()">Validate Planning</button>
+            <div id="validateResponse"></div>
+        </div>
+
+        <!-- Detect Conflicts -->
+        <div class="container">
+            <h2>⚠️ Detect Conflicts</h2>
+            <div class="form-group">
+                <label for="conflictEmployeeId">Employee ID (optional):</label>
+                <input type="number" id="conflictEmployeeId" placeholder="Leave empty for all">
+            </div>
+            <div class="form-group">
+                <label for="conflictStartDate">Start Date (optional):</label>
+                <input type="date" id="conflictStartDate">
+            </div>
+            <div class="form-group">
+                <label for="conflictEndDate">End Date (optional):</label>
+                <input type="date" id="conflictEndDate">
+            </div>
+            <button class="danger" onclick="detectConflicts()">Detect Conflicts</button>
+            <div id="conflictResponse"></div>
+        </div>
+    </div>
+
+    <script>
+        function getAuthToken() {
+            return document.getElementById('authToken').value.trim();
+        }
+
+        function showResponse(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            const className = isError ? 'error' : 'success';
+            element.innerHTML = `
+                <div class="${className}">
+                    ${isError ? 'Error' : 'Success'}
+                </div>
+                <div class="response">${JSON.stringify(data, null, 2)}</div>
+            `;
+        }
+
+        async function makeRequest(url, method = 'GET', body = null) {
+            const token = getAuthToken();
+            if (!token) {
+                throw new Error('Please provide an access token');
+            }
+
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            };
+
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            try {
+                const response = await fetch(url, options);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw { status: response.status, data };
+                }
+                
+                return data;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // Auth Test
+        async function testAuthUser() {
+            try {
+                const result = await makeRequest('/api/auth/me');
+                showResponse('authResponse', result);
+            } catch (error) {
+                showResponse('authResponse', error, true);
+            }
+        }
+
+        // Get Planning Entries
+        async function getPlanningEntries() {
+            try {
+                const params = new URLSearchParams();
+                
+                const startDate = document.getElementById('planningStartDate').value;
+                const endDate = document.getElementById('planningEndDate').value;
+                
+                if (!startDate || !endDate) {
+                    throw new Error('Start date and end date are required');
+                }
+                
+                params.append('start_date', startDate);
+                params.append('end_date', endDate);
+                
+                const employeeId = document.getElementById('planningEmployeeId').value;
+                if (employeeId) params.append('employee_id', employeeId);
+                
+                const departmentId = document.getElementById('planningDepartmentId').value;
+                if (departmentId) params.append('department_id', departmentId);
+
+                const result = await makeRequest(`/api/planning?${params.toString()}`);
+                showResponse('planningResponse', result);
+            } catch (error) {
+                showResponse('planningResponse', error, true);
+            }
+        }
+
+        // Get Weekly Planning
+        async function getWeeklyPlanning() {
+            try {
+                const employeeId = document.getElementById('weeklyEmployeeId').value;
+                const weekStart = document.getElementById('weekStart').value;
+                
+                if (!employeeId || !weekStart) {
+                    throw new Error('Employee ID and week start are required');
+                }
+
+                const result = await makeRequest(`/api/planning/${employeeId}/week/${weekStart}`);
+                showResponse('weeklyResponse', result);
+            } catch (error) {
+                showResponse('weeklyResponse', error, true);
+            }
+        }
+
+        // Generate Planning
+        async function generatePlanning() {
+            try {
+                const generateData = {
+                    start_date: document.getElementById('generateStartDate').value,
+                    end_date: document.getElementById('generateEndDate').value,
+                };
+
+                if (!generateData.start_date || !generateData.end_date) {
+                    throw new Error('Start date and end date are required');
+                }
+
+                const departmentId = document.getElementById('generateDepartmentId').value;
+                if (departmentId) generateData.department_id = parseInt(departmentId);
+
+                const employeeIds = document.getElementById('generateEmployeeIds').value;
+                if (employeeIds) {
+                    generateData.employee_ids = employeeIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                }
+
+                const result = await makeRequest('/api/planning/generate', 'POST', generateData);
+                showResponse('generateResponse', result);
+            } catch (error) {
+                showResponse('generateResponse', error, true);
+            }
+        }
+
+        // Update Planning Entry
+        async function updatePlanningEntry() {
+            try {
+                const entryId = document.getElementById('updatePlanningId').value;
+                if (!entryId) {
+                    throw new Error('Planning entry ID is required');
+                }
+
+                const updateData = {};
+                
+                const date = document.getElementById('updateDate').value;
+                if (date) updateData.date = date;
+                
+                const startTime = document.getElementById('updateStartTime').value;
+                if (startTime) updateData.start_time = startTime;
+                
+                const endTime = document.getElementById('updateEndTime').value;
+                if (endTime) updateData.end_time = endTime;
+                
+                const type = document.getElementById('updateType').value;
+                if (type) updateData.type = type;
+                
+                const status = document.getElementById('updateStatus').value;
+                if (status) updateData.status = status;
+                
+                const notes = document.getElementById('updateNotes').value;
+                if (notes) updateData.notes = notes;
+
+                if (Object.keys(updateData).length === 0) {
+                    throw new Error('Please provide at least one field to update');
+                }
+
+                const result = await makeRequest(`/api/planning/${entryId}`, 'PUT', updateData);
+                showResponse('updateResponse', result);
+            } catch (error) {
+                showResponse('updateResponse', error, true);
+            }
+        }
+
+        // Bulk Planning Operation
+        async function bulkPlanningOperation() {
+            try {
+                const entriesText = document.getElementById('bulkEntries').value;
+                if (!entriesText) {
+                    throw new Error('Please provide entries in JSON format');
+                }
+
+                let entries;
+                try {
+                    entries = JSON.parse(entriesText);
+                } catch (e) {
+                    throw new Error('Invalid JSON format');
+                }
+
+                if (!Array.isArray(entries) || entries.length === 0) {
+                    throw new Error('Entries must be a non-empty array');
+                }
+
+                const result = await makeRequest('/api/planning/bulk', 'POST', { entries });
+                showResponse('bulkResponse', result);
+            } catch (error) {
+                showResponse('bulkResponse', error, true);
+            }
+        }
+
+        // Validate Planning
+        async function validatePlanning() {
+            try {
+                const validationData = {
+                    employee_id: parseInt(document.getElementById('validateEmployeeId').value),
+                    week_start: document.getElementById('validateWeekStart').value,
+                    status: document.getElementById('validateStatus').value,
+                };
+
+                if (!validationData.employee_id || !validationData.week_start || !validationData.status) {
+                    throw new Error('Employee ID, week start, and status are required');
+                }
+
+                const comments = document.getElementById('validateComments').value;
+                if (comments) validationData.comments = comments;
+
+                const result = await makeRequest('/api/planning/validate', 'POST', validationData);
+                showResponse('validateResponse', result);
+            } catch (error) {
+                showResponse('validateResponse', error, true);
+            }
+        }
+
+        // Detect Conflicts
+        async function detectConflicts() {
+            try {
+                const params = new URLSearchParams();
+                
+                const employeeId = document.getElementById('conflictEmployeeId').value;
+                if (employeeId) params.append('employee_id', employeeId);
+                
+                const startDate = document.getElementById('conflictStartDate').value;
+                if (startDate) params.append('start_date', startDate);
+                
+                const endDate = document.getElementById('conflictEndDate').value;
+                if (endDate) params.append('end_date', endDate);
+
+                const result = await makeRequest(`/api/planning/conflicts?${params.toString()}`);
+                showResponse('conflictResponse', result);
+            } catch (error) {
+                showResponse('conflictResponse', error, true);
+            }
+        }
+
+        // Pre-fill some demo data
+        const today = new Date();
+        const nextWeek = new Date(today);
+        nextWeek.setDate(today.getDate() + 7);
+        
+        // Set default dates
+        document.getElementById('planningStartDate').value = today.toISOString().split('T')[0];
+        document.getElementById('planningEndDate').value = nextWeek.toISOString().split('T')[0];
+        document.getElementById('generateStartDate').value = today.toISOString().split('T')[0];
+        document.getElementById('generateEndDate').value = nextWeek.toISOString().split('T')[0];
+        
+        // Set Monday as week start
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - today.getDay() + 1);
+        document.getElementById('weekStart').value = monday.toISOString().split('T')[0];
+        document.getElementById('validateWeekStart').value = monday.toISOString().split('T')[0];
+        
+        // Demo employee ID
+        document.getElementById('weeklyEmployeeId').value = '1';
+        document.getElementById('validateEmployeeId').value = '1';
+        document.getElementById('planningEmployeeId').value = '1';
+    </script>
+</body>
+</html>

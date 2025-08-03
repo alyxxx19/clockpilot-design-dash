@@ -443,6 +443,60 @@ export const employeeQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
+// Planning API schemas
+export const planningQuerySchema = z.object({
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
+  employee_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  department_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+});
+
+export const generatePlanningSchema = z.object({
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
+  template_id: z.number().int().positive().optional(),
+  employee_ids: z.array(z.number().int().positive()).optional(),
+  department_id: z.number().int().positive().optional(),
+});
+
+export const updatePlanningEntrySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/, "Start time must be in HH:MM format").optional(),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/, "End time must be in HH:MM format").optional(),
+  type: z.enum(['work', 'vacation', 'sick', 'training', 'meeting']).optional(),
+  status: z.enum(['draft', 'submitted', 'validated', 'rejected']).optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export const bulkPlanningSchema = z.object({
+  entries: z.array(z.object({
+    id: z.number().int().positive().optional(), // For updates
+    employee_id: z.number().int().positive(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
+    start_time: z.string().regex(/^\d{2}:\d{2}$/, "Start time must be in HH:MM format"),
+    end_time: z.string().regex(/^\d{2}:\d{2}$/, "End time must be in HH:MM format"),
+    type: z.enum(['work', 'vacation', 'sick', 'training', 'meeting']).default('work'),
+    notes: z.string().max(500).optional(),
+  })).min(1).max(100), // Limit bulk operations
+});
+
+export const validatePlanningSchema = z.object({
+  employee_id: z.number().int().positive(),
+  week_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Week start must be in YYYY-MM-DD format"),
+  status: z.enum(['pending', 'validated', 'rejected']),
+  comments: z.string().max(1000).optional(),
+});
+
+// Planning conflict types
+export type PlanningConflict = {
+  type: 'max_daily_hours' | 'max_weekly_hours' | 'insufficient_rest' | 'overlap' | 'weekly_average';
+  severity: 'warning' | 'error';
+  employeeId: number;
+  date: string;
+  description: string;
+  suggestions: string[];
+};
+
 // Departments schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({
   id: true,

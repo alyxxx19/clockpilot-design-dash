@@ -11,6 +11,11 @@ import {
   createEmployeeSchema,
   updateEmployeeSchema,
   employeeQuerySchema,
+  planningQuerySchema,
+  generatePlanningSchema,
+  updatePlanningEntrySchema,
+  bulkPlanningSchema,
+  validatePlanningSchema,
   type User,
   type Employee 
 } from "@shared/schema";
@@ -789,6 +794,465 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         error: 'Failed to fetch employee statistics',
         code: 'FETCH_STATS_ERROR'
+      });
+    }
+  });
+
+  // ========================================
+  // PLANNING API ENDPOINTS
+  // ========================================
+
+  // GET /api/planning - Get planning entries with filters
+  app.get('/api/planning', authenticateToken, validateRequest(planningQuerySchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { start_date, end_date, employee_id, department_id } = req.query as any;
+      
+      // Check permissions - employees can only see their own planning
+      const isAdmin = req.user!.role === 'admin';
+      let targetEmployeeId = employee_id;
+      
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        
+        // Override employee_id to only show current user's planning
+        targetEmployeeId = currentUserEmployee.id;
+      }
+
+      const planningEntries = await storage.getPlanningEntries(
+        start_date, 
+        end_date, 
+        targetEmployeeId, 
+        department_id
+      );
+
+      // Group by date and calculate totals
+      const entriesByDate = planningEntries.reduce((acc, entry) => {
+        if (!acc[entry.date]) {
+          acc[entry.date] = { entries: [], totalHours: 0, types: {} };
+        }
+        acc[entry.date].entries.push(entry);
+        
+        // Calculate hours for work entries
+        if (entry.startTime && entry.endTime && entry.type === 'work') {
+          const start = new Date(`1970-01-01T${entry.startTime}:00`);
+          const end = new Date(`1970-01-01T${entry.endTime}:00`);
+          const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+          acc[entry.date].totalHours += hours;
+        }
+        
+        // Count types
+        acc[entry.date].types[entry.type] = (acc[entry.date].types[entry.type] || 0) + 1;
+        
+        return acc;
+      }, {} as Record<string, any>);
+
+      res.json({
+        message: 'Planning entries retrieved successfully',
+        data: {
+          startDate: start_date,
+          endDate: end_date,
+          entriesByDate,
+          totalEntries: planningEntries.length,
+        },
+      });
+    } catch (error) {
+      console.error('Get planning error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch planning entries',
+        code: 'FETCH_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // POST /api/planning/generate - Generate planning for a period (Admin only)
+  app.post('/api/planning/generate', authenticateToken, authorizeRole(['admin']), validateRequest(generatePlanningSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { start_date, end_date, template_id, employee_ids, department_id } = req.body;
+
+      const generatedEntries = await storage.generatePlanningForPeriod(
+        start_date,
+        end_date,
+        employee_ids,
+        department_id,
+        template_id
+      );
+
+      res.status(201).json({
+        message: 'Planning generated successfully',
+        data: {
+          generatedEntries: generatedEntries.length,
+          entries: generatedEntries,
+          period: { start_date, end_date },
+        },
+      });
+    } catch (error) {
+      console.error('Generate planning error:', error);
+      res.status(500).json({
+        error: 'Failed to generate planning',
+        code: 'GENERATE_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // GET /api/planning/:employee_id/week/:date - Get weekly planning for employee
+  app.get('/api/planning/:employee_id/week/:date', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.employee_id);
+      const weekStart = req.params.date;
+
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_EMPLOYEE_ID'
+        });
+      }
+
+      // Validate date format
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+        return res.status(400).json({
+          error: 'Invalid date format, use YYYY-MM-DD',
+          code: 'INVALID_DATE_FORMAT'
+        });
+      }
+
+      // Check permissions
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only view own planning',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      const weeklyPlanning = await storage.getEmployeeWeeklyPlanning(employeeId, weekStart);
+
+      res.json({
+        message: 'Weekly planning retrieved successfully',
+        data: weeklyPlanning,
+      });
+    } catch (error) {
+      console.error('Get weekly planning error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch weekly planning',
+        code: 'FETCH_WEEKLY_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // PUT /api/planning/:id - Update planning entry
+  app.put('/api/planning/:id', authenticateToken, validateRequest(updatePlanningEntrySchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const entryId = parseInt(req.params.id);
+      if (isNaN(entryId)) {
+        return res.status(400).json({
+          error: 'Invalid planning entry ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      const updateData = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Get existing entry to check ownership
+      const existingEntries = await storage.getPlanningEntries(
+        '1900-01-01', // Very old date
+        '2100-12-31', // Very future date  
+        undefined,
+        undefined
+      );
+      const existingEntry = existingEntries.find(e => e.id === entryId);
+
+      if (!existingEntry) {
+        return res.status(404).json({
+          error: 'Planning entry not found',
+          code: 'ENTRY_NOT_FOUND'
+        });
+      }
+
+      // Check permissions
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== existingEntry.employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only update own planning',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      // Validate conflicts if changing time/date
+      if (updateData.date || updateData.start_time || updateData.end_time) {
+        const targetDate = updateData.date || existingEntry.date;
+        const targetStartTime = updateData.start_time || existingEntry.startTime;
+        const targetEndTime = updateData.end_time || existingEntry.endTime;
+
+        if (targetStartTime && targetEndTime) {
+          const validation = await storage.validateDailyHours(
+            existingEntry.employeeId,
+            targetDate,
+            targetStartTime,
+            targetEndTime
+          );
+
+          if (!validation.valid) {
+            return res.status(409).json({
+              error: 'Planning conflicts detected',
+              code: 'PLANNING_CONFLICTS',
+              conflicts: validation.conflicts,
+            });
+          }
+
+          // Check rest period
+          const restValidation = await storage.validateRestPeriod(
+            existingEntry.employeeId,
+            targetDate,
+            targetStartTime
+          );
+
+          if (!restValidation.valid) {
+            return res.status(409).json({
+              error: 'Rest period violation',
+              code: 'REST_PERIOD_VIOLATION',
+              conflicts: restValidation.conflicts,
+            });
+          }
+        }
+      }
+
+      // Convert frontend field names to database field names
+      const dbUpdateData: any = {};
+      if (updateData.date) dbUpdateData.date = updateData.date;
+      if (updateData.start_time) dbUpdateData.start_time = updateData.start_time;
+      if (updateData.end_time) dbUpdateData.end_time = updateData.end_time;
+      if (updateData.type) dbUpdateData.type = updateData.type;
+      if (updateData.status) dbUpdateData.status = updateData.status;
+      if (updateData.notes) dbUpdateData.notes = updateData.notes;
+
+      const updatedEntry = await storage.updatePlanningEntry(entryId, dbUpdateData);
+      
+      if (!updatedEntry) {
+        return res.status(500).json({
+          error: 'Failed to update planning entry',
+          code: 'UPDATE_FAILED'
+        });
+      }
+
+      res.json({
+        message: 'Planning entry updated successfully',
+        data: updatedEntry,
+      });
+    } catch (error) {
+      console.error('Update planning entry error:', error);
+      res.status(500).json({
+        error: 'Failed to update planning entry',
+        code: 'UPDATE_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // POST /api/planning/bulk - Bulk create/update planning entries (Admin only)
+  app.post('/api/planning/bulk', authenticateToken, authorizeRole(['admin']), validateRequest(bulkPlanningSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { entries } = req.body;
+      
+      // Separate creates and updates
+      const createEntries = entries.filter((e: any) => !e.id);
+      const updateEntries = entries.filter((e: any) => e.id);
+
+      // Validate all entries for conflicts
+      const validationResults = [];
+      for (const entry of entries) {
+        const validation = await storage.validateDailyHours(
+          entry.employee_id,
+          entry.date,
+          entry.start_time,
+          entry.end_time
+        );
+        
+        if (!validation.valid) {
+          validationResults.push({
+            entry,
+            conflicts: validation.conflicts,
+          });
+        }
+      }
+
+      if (validationResults.length > 0) {
+        return res.status(409).json({
+          error: 'Multiple planning conflicts detected',
+          code: 'BULK_PLANNING_CONFLICTS',
+          conflicts: validationResults,
+        });
+      }
+
+      // Execute bulk operations
+      const results = {
+        created: [],
+        updated: [],
+      };
+
+      if (createEntries.length > 0) {
+        const createdEntries = await storage.bulkCreatePlanningEntries(
+          createEntries.map((e: any) => ({
+            employee_id: e.employee_id,
+            date: e.date,
+            start_time: e.start_time,
+            end_time: e.end_time,
+            type: e.type || 'work',
+            status: 'draft',
+            notes: e.notes,
+          }))
+        );
+        results.created = createdEntries;
+      }
+
+      if (updateEntries.length > 0) {
+        const updatedEntries = await storage.bulkUpdatePlanningEntries(
+          updateEntries.map((e: any) => ({
+            id: e.id,
+            data: {
+              date: e.date,
+              start_time: e.start_time,
+              end_time: e.end_time,
+              type: e.type,
+              notes: e.notes,
+            },
+          }))
+        );
+        results.updated = updatedEntries;
+      }
+
+      res.status(201).json({
+        message: 'Bulk planning operation completed successfully',
+        data: results,
+        summary: {
+          totalProcessed: entries.length,
+          created: results.created.length,
+          updated: results.updated.length,
+        },
+      });
+    } catch (error) {
+      console.error('Bulk planning error:', error);
+      res.status(500).json({
+        error: 'Failed to process bulk planning operation',
+        code: 'BULK_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // POST /api/planning/validate - Validate planning for employee/week (Admin/Manager only)
+  app.post('/api/planning/validate', authenticateToken, authorizeRole(['admin']), validateRequest(validatePlanningSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { employee_id, week_start, status, comments } = req.body;
+
+      // Check if employee exists
+      const employee = await storage.getEmployee(employee_id);
+      if (!employee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      // Check for existing validation
+      const existingValidation = await storage.getValidationByEmployeeAndWeek(employee_id, week_start);
+      if (existingValidation) {
+        return res.status(409).json({
+          error: 'Validation already exists for this employee and week',
+          code: 'VALIDATION_EXISTS',
+          data: existingValidation,
+        });
+      }
+
+      // Create validation entry
+      const validation = await storage.createValidation({
+        employee_id,
+        week_start,
+        status,
+        comments,
+        validator_id: req.user!.id,
+      });
+
+      // Get planning summary for the week
+      const weeklyPlanning = await storage.getEmployeeWeeklyPlanning(employee_id, week_start);
+
+      res.status(201).json({
+        message: 'Planning validation created successfully',
+        data: {
+          validation,
+          planningSummary: weeklyPlanning.summary,
+        },
+      });
+    } catch (error) {
+      console.error('Validate planning error:', error);
+      res.status(500).json({
+        error: 'Failed to validate planning',
+        code: 'VALIDATE_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // GET /api/planning/conflicts - Detect planning conflicts
+  app.get('/api/planning/conflicts', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const { employee_id, start_date, end_date } = req.query;
+      
+      // Check permissions
+      const isAdmin = req.user!.role === 'admin';
+      let targetEmployeeId = employee_id ? parseInt(employee_id as string) : undefined;
+      
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        
+        // Override to only check current user's conflicts
+        targetEmployeeId = currentUserEmployee.id;
+      }
+
+      const conflicts = await storage.detectPlanningConflicts(
+        targetEmployeeId,
+        start_date as string,
+        end_date as string
+      );
+
+      // Group conflicts by severity
+      const groupedConflicts = {
+        errors: conflicts.filter(c => c.severity === 'error'),
+        warnings: conflicts.filter(c => c.severity === 'warning'),
+      };
+
+      res.json({
+        message: 'Planning conflicts analysis completed',
+        data: {
+          conflicts,
+          summary: {
+            totalConflicts: conflicts.length,
+            errors: groupedConflicts.errors.length,
+            warnings: groupedConflicts.warnings.length,
+            affectedEmployees: [...new Set(conflicts.map(c => c.employeeId))].length,
+          },
+          groupedConflicts,
+        },
+      });
+    } catch (error) {
+      console.error('Detect conflicts error:', error);
+      res.status(500).json({
+        error: 'Failed to detect planning conflicts',
+        code: 'DETECT_CONFLICTS_ERROR'
       });
     }
   });
