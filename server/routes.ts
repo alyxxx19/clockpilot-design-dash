@@ -30,9 +30,14 @@ import {
   updateTimeEntrySchema,
   bulkTimeEntriesSchema,
   submitTimeEntriesSchema,
+  createNotificationSchema,
+  notificationQuerySchema,
+  markReadSchema,
   type User,
-  type Employee 
+  type Employee,
+  type Notification
 } from "@shared/schema";
+import { initializeNotificationService, getNotificationService } from "./notificationService";
 
 // ============================================================================
 // INTERFACES
@@ -2281,6 +2286,216 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
+  // NOTIFICATIONS API ENDPOINTS
+  // ========================================
+
+  // GET /api/notifications - Get user's notifications with pagination and filters
+  app.get('/api/notifications', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const validation = notificationQuerySchema.safeParse(req.query);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid query parameters',
+          details: validation.error.issues
+        });
+      }
+
+      const { page, limit, type, read } = validation.data;
+      const result = await storage.getNotificationsByUser(req.user!.id, {
+        page,
+        limit,
+        type,
+        read
+      });
+
+      res.json({
+        success: true,
+        data: result,
+        pagination: {
+          page,
+          limit,
+          total: result.total,
+          totalPages: Math.ceil(result.total / limit)
+        }
+      });
+    } catch (error) {
+      console.error('Get notifications error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch notifications',
+        code: 'FETCH_NOTIFICATIONS_ERROR'
+      });
+    }
+  });
+
+  // GET /api/notifications/unread-count - Get unread notifications count
+  app.get('/api/notifications/unread-count', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const count = await storage.getUnreadNotificationCount(req.user!.id);
+      res.json({ success: true, count });
+    } catch (error) {
+      console.error('Get unread count error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch unread count',
+        code: 'FETCH_UNREAD_COUNT_ERROR'
+      });
+    }
+  });
+
+  // POST /api/notifications - Create notification (admin only)
+  app.post('/api/notifications', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const validation = createNotificationSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: 'Invalid notification data',
+          details: validation.error.issues
+        });
+      }
+
+      const notificationService = getNotificationService();
+      const notification = await notificationService.sendNotificationToUser(
+        validation.data.user_id,
+        validation.data
+      );
+
+      res.status(201).json({
+        success: true,
+        notification,
+        message: 'Notification created and sent successfully'
+      });
+    } catch (error) {
+      console.error('Create notification error:', error);
+      res.status(500).json({
+        error: 'Failed to create notification',
+        code: 'CREATE_NOTIFICATION_ERROR'
+      });
+    }
+  });
+
+  // PUT /api/notifications/:id/read - Mark notification as read
+  app.put('/api/notifications/:id/read', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const notificationId = parseInt(req.params.id);
+      if (isNaN(notificationId)) {
+        return res.status(400).json({
+          error: 'Invalid notification ID',
+          code: 'INVALID_NOTIFICATION_ID'
+        });
+      }
+
+      // Verify notification belongs to the user
+      const notification = await storage.getNotification(notificationId);
+      if (!notification) {
+        return res.status(404).json({
+          error: 'Notification not found',
+          code: 'NOTIFICATION_NOT_FOUND'
+        });
+      }
+
+      if (notification.user_id !== req.user!.id) {
+        return res.status(403).json({
+          error: 'Access denied - not your notification',
+          code: 'ACCESS_DENIED'
+        });
+      }
+
+      const success = await storage.markNotificationAsRead(notificationId);
+      if (success) {
+        // Send updated unread count via WebSocket
+        const notificationService = getNotificationService();
+        await notificationService.sendUnreadCount(req.user!.id);
+
+        res.json({
+          success: true,
+          message: 'Notification marked as read'
+        });
+      } else {
+        res.status(500).json({
+          error: 'Failed to mark notification as read',
+          code: 'MARK_READ_ERROR'
+        });
+      }
+    } catch (error) {
+      console.error('Mark notification read error:', error);
+      res.status(500).json({
+        error: 'Failed to mark notification as read',
+        code: 'MARK_READ_ERROR'
+      });
+    }
+  });
+
+  // POST /api/notifications/read-all - Mark all notifications as read
+  app.post('/api/notifications/read-all', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const count = await storage.markAllNotificationsAsRead(req.user!.id);
+      
+      // Send updated unread count via WebSocket
+      const notificationService = getNotificationService();
+      await notificationService.sendUnreadCount(req.user!.id);
+
+      res.json({
+        success: true,
+        count,
+        message: `${count} notifications marked as read`
+      });
+    } catch (error) {
+      console.error('Mark all notifications read error:', error);
+      res.status(500).json({
+        error: 'Failed to mark all notifications as read',
+        code: 'MARK_ALL_READ_ERROR'
+      });
+    }
+  });
+
+  // DELETE /api/notifications/:id - Delete notification
+  app.delete('/api/notifications/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const notificationId = parseInt(req.params.id);
+      if (isNaN(notificationId)) {
+        return res.status(400).json({
+          error: 'Invalid notification ID',
+          code: 'INVALID_NOTIFICATION_ID'
+        });
+      }
+
+      // Verify notification belongs to the user
+      const notification = await storage.getNotification(notificationId);
+      if (!notification) {
+        return res.status(404).json({
+          error: 'Notification not found',
+          code: 'NOTIFICATION_NOT_FOUND'
+        });
+      }
+
+      if (notification.user_id !== req.user!.id) {
+        return res.status(403).json({
+          error: 'Access denied - not your notification',
+          code: 'ACCESS_DENIED'
+        });
+      }
+
+      const success = await storage.deleteNotification(notificationId);
+      if (success) {
+        res.json({
+          success: true,
+          message: 'Notification deleted successfully'
+        });
+      } else {
+        res.status(500).json({
+          error: 'Failed to delete notification',
+          code: 'DELETE_NOTIFICATION_ERROR'
+        });
+      }
+    } catch (error) {
+      console.error('Delete notification error:', error);
+      res.status(500).json({
+        error: 'Failed to delete notification',
+        code: 'DELETE_NOTIFICATION_ERROR'
+      });
+    }
+  });
+
+  // ========================================
   // ERROR HANDLING MIDDLEWARE
   // ========================================
   app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
@@ -2292,6 +2507,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Create HTTP server and initialize WebSocket service
   const httpServer = createServer(app);
+  
+  // Initialize notification service with WebSocket support
+  initializeNotificationService(httpServer);
+  console.log('✅ Notification service with WebSocket initialized');
+  
   return httpServer;
 }

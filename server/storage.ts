@@ -9,6 +9,7 @@ import {
   tasks,
   settings,
   validations,
+  notifications,
   type User, 
   type InsertUser,
   type Employee,
@@ -23,6 +24,8 @@ import {
   type InsertTimeEntry,
   type Task,
   type InsertTask,
+  type Notification,
+  type InsertNotification,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, like, or } from "drizzle-orm";
@@ -157,6 +160,15 @@ export interface IStorage {
   getTasksByProject(projectId: number): Promise<Task[]>;
   createTask(task: InsertTask): Promise<Task>;
   updateTask(id: number, task: Partial<InsertTask>): Promise<Task | undefined>;
+
+  // Notifications
+  getNotification(id: number): Promise<Notification | undefined>;
+  getNotificationsByUser(userId: number, filters?: { page?: number; limit?: number; type?: string; read?: boolean; }): Promise<{ notifications: Notification[]; total: number; }>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  markNotificationAsRead(id: number): Promise<boolean>;
+  markAllNotificationsAsRead(userId: number): Promise<number>;
+  deleteNotification(id: number): Promise<boolean>;
+  getUnreadNotificationCount(userId: number): Promise<number>;
 }
 
 // ============================================================================
@@ -1934,6 +1946,108 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tasks.id, id))
       .returning();
     return task || undefined;
+  }
+
+  // ========================================
+  // NOTIFICATIONS OPERATIONS
+  // ========================================
+
+  async getNotification(id: number): Promise<Notification | undefined> {
+    const [notification] = await db.select().from(notifications).where(eq(notifications.id, id));
+    return notification || undefined;
+  }
+
+  async getNotificationsByUser(
+    userId: number, 
+    filters?: { page?: number; limit?: number; type?: string; read?: boolean; }
+  ): Promise<{ notifications: Notification[]; total: number; }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+
+    // Build the WHERE conditions
+    let whereConditions = [eq(notifications.user_id, userId)];
+    
+    if (filters?.type) {
+      whereConditions.push(eq(notifications.type, filters.type as any));
+    }
+    
+    if (filters?.read !== undefined) {
+      if (filters.read) {
+        whereConditions.push(sql`${notifications.read_at} IS NOT NULL`);
+      } else {
+        whereConditions.push(sql`${notifications.read_at} IS NULL`);
+      }
+    }
+
+    // Get notifications with pagination
+    const notificationsList = await db
+      .select()
+      .from(notifications)
+      .where(and(...whereConditions))
+      .orderBy(desc(notifications.created_at))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`cast(count(*) as int)` })
+      .from(notifications)
+      .where(and(...whereConditions));
+
+    return {
+      notifications: notificationsList,
+      total: count,
+    };
+  }
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const [newNotification] = await db
+      .insert(notifications)
+      .values(notification)
+      .returning();
+    return newNotification;
+  }
+
+  async markNotificationAsRead(id: number): Promise<boolean> {
+    const result = await db
+      .update(notifications)
+      .set({ read_at: new Date() })
+      .where(eq(notifications.id, id));
+    return result.rowCount > 0;
+  }
+
+  async markAllNotificationsAsRead(userId: number): Promise<number> {
+    const result = await db
+      .update(notifications)
+      .set({ read_at: new Date() })
+      .where(
+        and(
+          eq(notifications.user_id, userId),
+          sql`${notifications.read_at} IS NULL`
+        )
+      );
+    return result.rowCount;
+  }
+
+  async deleteNotification(id: number): Promise<boolean> {
+    const result = await db
+      .delete(notifications)
+      .where(eq(notifications.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getUnreadNotificationCount(userId: number): Promise<number> {
+    const [{ count }] = await db
+      .select({ count: sql<number>`cast(count(*) as int)` })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.user_id, userId),
+          sql`${notifications.read_at} IS NULL`
+        )
+      );
+    return count;
   }
 }
 

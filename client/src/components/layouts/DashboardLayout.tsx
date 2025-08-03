@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { NotificationDropdown } from '@/components/NotificationDropdown';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -103,14 +104,19 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
               </div>
               <span className="text-xl font-bold text-foreground">Clock Pilot</span>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="lg:hidden"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="hidden lg:block">
+                <NotificationDropdown />
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="lg:hidden"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {/* User info */}
@@ -118,11 +124,13 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center">
                 <span className="text-sm font-medium text-accent-foreground">
-                  {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                  {user?.employee?.firstName?.charAt(0) || user?.username?.charAt(0) || user?.email?.charAt(0) || 'U'}
                 </span>
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground">{user?.name || 'Utilisateur'}</p>
+                <p className="text-sm font-medium text-foreground">
+                  {user?.employee ? `${user.employee.firstName} ${user.employee.lastName}` : user?.username || 'Utilisateur'}
+                </p>
                 <p className="text-xs text-muted-foreground">Employé</p>
               </div>
             </div>
@@ -180,6 +188,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
             </div>
             <span className="text-lg font-bold text-foreground">Clock Pilot</span>
           </div>
+          <NotificationDropdown />
         </div>
 
         {/* Page content */}

@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 import { queryClient } from "@/lib/queryClient";
 
 // Pages
@@ -23,6 +24,7 @@ import { Tasks } from "./pages/employee/Tasks";
 import { Reports } from "./pages/employee/Reports";
 import { Settings } from "./pages/employee/Settings";
 import { ScheduleComparison } from "./pages/employee/ScheduleComparison";
+import { NotificationsPage } from "./pages/NotificationsPage";
 import NotFound from "./pages/NotFound";
 import { FileUploadDemo } from "@/components/upload/FileUploadDemo";
 
@@ -144,6 +146,13 @@ const AppRoutes = () => {
         </ProtectedRoute>
       } />
       
+      {/* Shared Routes */}
+      <Route path="/notifications" element={
+        <ProtectedRoute>
+          <NotificationsPage />
+        </ProtectedRoute>
+      } />
+      
       {/* Upload Demo Route */}
       <Route path="/upload-demo" element={
         <ProtectedRoute>
@@ -160,14 +169,16 @@ const AppRoutes = () => {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-        <ReactQueryDevtools initialIsOpen={false} />
-      </TooltipProvider>
+      <NotificationProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+          <ReactQueryDevtools initialIsOpen={false} />
+        </TooltipProvider>
+      </NotificationProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

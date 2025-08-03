@@ -1,5 +1,6 @@
 import { 
   pgTable, 
+  pgEnum,
   text, 
   serial, 
   integer, 
@@ -9,11 +10,13 @@ import {
   time,
   decimal,
   json,
+  jsonb,
+  varchar,
   uuid,
   index,
   foreignKey
 } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
+import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { relations } from "drizzle-orm";
 import { z } from "zod";
 
@@ -245,14 +248,59 @@ export const validations = pgTable("validations", {
 }));
 
 // ============================================================================
+// NOTIFICATIONS SYSTEM
+// ============================================================================
+
+// Notification types enum
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "task_assigned",
+  "planning_modified", 
+  "validation_required",
+  "time_missing",
+  "overtime_alert",
+  "schedule_conflict",
+  "system_update",
+  "reminder"
+]);
+
+// Notification priority enum
+export const notificationPriorityEnum = pgEnum("notification_priority", [
+  "low",
+  "medium", 
+  "high",
+  "urgent"
+]);
+
+// Notifications table
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: notificationTypeEnum("type").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  data: jsonb("data"), // Additional structured data
+  action_url: varchar("action_url", { length: 512 }),
+  priority: notificationPriorityEnum("priority").notNull().default("medium"),
+  read_at: timestamp("read_at"),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  userIdIdx: index("notifications_user_id_idx").on(table.user_id),
+  createdAtIdx: index("notifications_created_at_idx").on(table.created_at),
+  readAtIdx: index("notifications_read_at_idx").on(table.read_at),
+  typeIdx: index("notifications_type_idx").on(table.type),
+  priorityIdx: index("notifications_priority_idx").on(table.priority),
+}));
+
+// ============================================================================
 // RELATIONS DEFINITIONS
 // ============================================================================
 
-export const usersRelations = relations(users, ({ one }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
   employee: one(employees, {
     fields: [users.id],
     references: [employees.user_id],
   }),
+  notifications: many(notifications),
 }));
 
 export const departmentsRelations = relations(departments, ({ many }) => ({
@@ -379,6 +427,13 @@ export const validationsRelations = relations(validations, ({ one }) => ({
     fields: [validations.validated_by],
     references: [employees.id],
     relationName: "validator",
+  }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, {
+    fields: [notifications.user_id],
+    references: [users.id],
   }),
 }));
 
@@ -577,6 +632,43 @@ export type TimeAnomaly = {
   description: string;
   suggestion: string;
 };
+
+// ============================================================================
+// NOTIFICATIONS SCHEMAS
+// ============================================================================
+
+// Notification schemas
+export const insertNotificationSchema = createInsertSchema(notifications);
+export const selectNotificationSchema = createSelectSchema(notifications);
+
+export const createNotificationSchema = z.object({
+  user_id: z.number().int().positive(),
+  type: z.enum(['task_assigned', 'planning_modified', 'validation_required', 'time_missing', 'overtime_alert', 'schedule_conflict', 'system_update', 'reminder']),
+  title: z.string().min(1).max(255),
+  message: z.string().min(1),
+  data: z.record(z.any()).optional(),
+  action_url: z.string().max(512).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
+});
+
+export const notificationQuerySchema = z.object({
+  page: z.string().transform(val => parseInt(val) || 1).pipe(z.number().int().min(1)).optional(),
+  limit: z.string().transform(val => parseInt(val) || 20).pipe(z.number().int().min(1).max(100)).optional(),
+  type: z.enum(['task_assigned', 'planning_modified', 'validation_required', 'time_missing', 'overtime_alert', 'schedule_conflict', 'system_update', 'reminder']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+  read: z.enum(['true', 'false']).optional(),
+  sort_by: z.enum(['created_at', 'priority', 'read_at']).default('created_at'),
+  sort_order: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export const markReadSchema = z.object({
+  read: z.boolean().default(true),
+});
+
+// Notification types
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = typeof notifications.$inferInsert;
+export type CreateNotification = z.infer<typeof createNotificationSchema>;
 
 // Departments schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({

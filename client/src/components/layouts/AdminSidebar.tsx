@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { NotificationDropdown } from '@/components/NotificationDropdown';
 
 export const AdminSidebar: React.FC = () => {
   const navigate = useNavigate();
@@ -83,6 +84,7 @@ export const AdminSidebar: React.FC = () => {
             </div>
             <span className="text-xl font-bold text-foreground">Clock Pilot</span>
           </div>
+          <NotificationDropdown />
         </div>
 
         {/* User info */}
