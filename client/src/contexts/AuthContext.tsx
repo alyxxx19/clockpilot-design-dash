@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { apiRequest } from '@/lib/queryClient';
 
 export type UserRole = 'admin' | 'employee';
 
@@ -9,8 +10,20 @@ export interface User {
   name: string;
 }
 
+export interface Employee {
+  id: number;
+  userId: number;
+  employeeNumber?: string;
+  department?: string;
+  position?: string;
+  hourlyRate?: string;
+  weeklyHours?: number;
+  isActive?: boolean;
+}
+
 interface AuthContextType {
   user: User | null;
+  employee: Employee | null;
   login: (email: string, password: string, role: UserRole) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
@@ -32,35 +45,45 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [employee, setEmployee] = useState<Employee | null>(null);
 
   const login = async (email: string, password: string, role: UserRole): Promise<boolean> => {
-    // Simulate demo accounts
-    if (email === 'demo-admin@clockpilot.com' && role === 'admin') {
-      setUser({
-        id: '1',
-        email: email,
-        role: 'admin',
-        name: 'Admin Demo'
+    try {
+      const response = await apiRequest('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, role }),
       });
-      return true;
-    } else if (email === 'demo-employee@clockpilot.com' && role === 'employee') {
-      setUser({
-        id: '2',
-        email: email,
-        role: 'employee',
-        name: 'Employé Demo'
-      });
-      return true;
+      
+      if (response.user) {
+        setUser({
+          id: response.user.id.toString(),
+          email: response.user.email,
+          role: response.user.role,
+          name: response.user.name
+        });
+        
+        if (response.employee) {
+          setEmployee(response.employee);
+        }
+        
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
     setUser(null);
+    setEmployee(null);
   };
 
   const value: AuthContextType = {
     user,
+    employee,
     login,
     logout,
     isAuthenticated: !!user

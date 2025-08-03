@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, CheckSquare, BarChart3, Calendar, Play, Pause, Square, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Clock, CheckSquare, BarChart3, Calendar, Play, Pause, Square, ChevronLeft, ChevronRight, User, Briefcase } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -8,56 +9,30 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
-interface Pointage {
-  id: string;
-  type: 'arrivee' | 'pause_debut' | 'pause_fin' | 'depart';
-  timestamp: Date;
-  date: string;
+interface DashboardStats {
+  totalWeekHours: string;
+  totalTodayHours: string;
+  activeTasks: number;
+  completedTasks: number;
+  todaySchedule: any;
+  recentTimeEntries: any[];
+  upcomingTasks: any[];
 }
-
-interface Shift {
-  start: string;
-  end: string;
-  task: string;
-  department: string;
-}
-
-interface Planning {
-  date: string;
-  shifts: Shift[];
-}
-
-// Données de planning de démonstration
-const mockPlanning: Planning[] = [
-  {
-    date: '2024-01-15',
-    shifts: [
-      { start: '08:30', end: '17:30', task: 'Production A', department: 'Production' }
-    ]
-  },
-  {
-    date: '2024-01-16',
-    shifts: [
-      { start: '08:30', end: '17:30', task: 'Production B', department: 'Production' }
-    ]
-  },
-  {
-    date: '2024-01-17',
-    shifts: [
-      { start: '09:00', end: '18:00', task: 'Formation', department: 'RH' }
-    ]
-  }
-];
 
 export const EmployeeDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, employee } = useAuth();
   
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [pointages, setPointages] = useState<Pointage[]>([]);
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [planningView, setPlanningView] = useState<'jour' | 'semaine' | 'mois'>('jour');
+
+  // Fetch dashboard stats
+  const { data: dashboardStats, isLoading: statsLoading } = useQuery<DashboardStats>({
+    queryKey: [`/api/dashboard/stats/${user?.id}`],
+    enabled: !!user?.id,
+  });
 
   // Mise à jour de l'heure en temps réel
   useEffect(() => {
