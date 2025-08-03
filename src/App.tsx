@@ -9,6 +9,11 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { Landing } from "./pages/Landing";
 import { Login } from "./pages/Login";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
+import { Employees } from "./pages/admin/Employees";
+import { Planning as AdminPlanning } from "./pages/admin/Planning";
+import { Validation } from "./pages/admin/Validation";
+import { Reports as AdminReports } from "./pages/admin/Reports";
+import { Settings as AdminSettings } from "./pages/admin/Settings";
 import { EmployeeDashboard } from "./pages/employee/EmployeeDashboard";
 import { Planning } from "./pages/employee/Planning";
 import { TimeEntry } from "./pages/employee/TimeEntry";
@@ -53,6 +58,31 @@ const AppRoutes = () => {
       <Route path="/admin/dashboard" element={
         <ProtectedRoute allowedRole="admin">
           <AdminDashboard />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/employees" element={
+        <ProtectedRoute allowedRole="admin">
+          <Employees />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/planning" element={
+        <ProtectedRoute allowedRole="admin">
+          <AdminPlanning />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/validation" element={
+        <ProtectedRoute allowedRole="admin">
+          <Validation />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/reports" element={
+        <ProtectedRoute allowedRole="admin">
+          <AdminReports />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/settings" element={
+        <ProtectedRoute allowedRole="admin">
+          <AdminSettings />
         </ProtectedRoute>
       } />
       

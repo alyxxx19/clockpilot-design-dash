@@ -1,60 +1,168 @@
 import React from 'react';
-import { Clock, LogOut } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { useAuth } from '@/contexts/AuthContext';
+import { AdminSidebar } from '@/components/layouts/AdminSidebar';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  BarChart3,
+  Clock,
+  Users,
+  AlertTriangle,
+  TrendingUp,
+  Calendar
+} from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
-  const { logout } = useAuth();
+  // Données de démonstration
+  const todayStats = {
+    totalHours: 124.5,
+    activeEmployees: 18,
+    presentEmployees: 15,
+    attendanceRate: 83
+  };
+
+  const recentAlerts = [
+    { id: 1, type: 'delay', employee: 'Marie Dupont', message: 'Retard de 15 min', time: '09:15' },
+    { id: 2, type: 'absence', employee: 'Jean Martin', message: 'Absence non justifiée', time: '08:00' },
+    { id: 3, type: 'overtime', employee: 'Sarah Wilson', message: 'Heures sup. non validées', time: '18:30' }
+  ];
+
+  const topEmployees = [
+    { name: 'Alice Dubois', hours: 42.5, department: 'Production' },
+    { name: 'Thomas Bernard', hours: 41.2, department: 'Logistique' },
+    { name: 'Emma Rousseau', hours: 39.8, department: 'Qualité' },
+    { name: 'Lucas Moreau', hours: 38.5, department: 'Production' },
+    { name: 'Camille Leroy', hours: 37.9, department: 'Admin' }
+  ];
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Sidebar */}
-      <div className="fixed inset-y-0 left-0 z-50 w-64 bg-sidebar border-r border-sidebar-border">
-        {/* Logo */}
-        <div className="h-16 flex items-center px-6 border-b border-sidebar-border">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
-              <Clock className="w-5 h-5 text-sidebar-primary-foreground" />
-            </div>
-            <span className="text-lg font-semibold text-sidebar-foreground">Clock Pilot</span>
-          </div>
-        </div>
-
-        {/* Spacer */}
-        <div className="flex-1"></div>
-
-        {/* Logout button */}
-        <div className="p-4 border-t border-sidebar-border">
-          <Button
-            variant="ghost"
-            className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            onClick={logout}
-          >
-            <LogOut className="mr-3 h-5 w-5" />
-            Déconnexion
-          </Button>
-        </div>
-      </div>
-
+      <AdminSidebar />
+      
       {/* Main Content */}
-      <main className="ml-64 min-h-screen flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-8 text-center">
-            <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-              <Clock className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <h1 className="text-2xl font-bold text-card-foreground mb-2">
-              Dashboard Administrateur
-            </h1>
-            <p className="text-muted-foreground">
-              Dashboard en cours de développement
-            </p>
-            <p className="text-sm text-muted-foreground mt-4">
-              Les fonctionnalités d'administration seront disponibles prochainement.
-            </p>
-          </CardContent>
-        </Card>
+      <main className="ml-64 min-h-screen p-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-foreground">Dashboard Administrateur</h1>
+          <p className="text-muted-foreground mt-1">Vue d'ensemble des activités en temps réel</p>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Heures Aujourd'hui</CardTitle>
+              <Clock className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{todayStats.totalHours}h</div>
+              <p className="text-xs text-muted-foreground">
+                <span className="text-green-600">+12%</span> vs hier
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Employés Actifs</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{todayStats.activeEmployees}</div>
+              <p className="text-xs text-muted-foreground">
+                Total employés
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Présents</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{todayStats.presentEmployees}</div>
+              <p className="text-xs text-muted-foreground">
+                sur {todayStats.activeEmployees} employés
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Taux de Présence</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{todayStats.attendanceRate}%</div>
+              <p className="text-xs text-muted-foreground">
+                <span className="text-green-600">+2%</span> vs semaine dernière
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Alertes Récentes */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Alertes Récentes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {recentAlerts.map((alert) => (
+                  <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <Badge 
+                        variant={
+                          alert.type === 'delay' ? 'secondary' : 
+                          alert.type === 'absence' ? 'destructive' : 'default'
+                        }
+                        className="w-2 h-2 p-0 rounded-full"
+                      />
+                      <div>
+                        <p className="font-medium text-sm">{alert.employee}</p>
+                        <p className="text-xs text-muted-foreground">{alert.message}</p>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{alert.time}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Top Employés */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Top 5 Employés (Cette Semaine)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {topEmployees.map((employee, index) => (
+                  <div key={employee.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-medium">
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">{employee.name}</p>
+                        <p className="text-xs text-muted-foreground">{employee.department}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-medium text-sm">{employee.hours}h</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </main>
     </div>
   );
