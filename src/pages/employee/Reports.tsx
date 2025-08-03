@@ -780,19 +780,6 @@ export const Reports: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Répartition par projet */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Briefcase className="h-5 w-5" />
-                  <span>Répartition Projets</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {renderProjectChart()}
-              </CardContent>
-            </Card>
-
             {/* Analyse et tendances */}
             <Card>
               <CardHeader>
