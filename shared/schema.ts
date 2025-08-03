@@ -497,6 +497,87 @@ export type PlanningConflict = {
   suggestions: string[];
 };
 
+// Time entry API schemas
+export const timeEntryQuerySchema = z.object({
+  employee_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date from must be in YYYY-MM-DD format").optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date to must be in YYYY-MM-DD format").optional(),
+  status: z.enum(['draft', 'submitted', 'validated', 'rejected']).optional(),
+  group_by: z.enum(['day', 'week', 'month']).default('day'),
+  page: z.string().transform(val => parseInt(val) || 1).pipe(z.number().int().min(1)).optional(),
+  limit: z.string().transform(val => parseInt(val) || 20).pipe(z.number().int().min(1).max(100)).optional(),
+});
+
+export const createTimeEntrySchema = z.object({
+  employee_id: z.number().int().positive().optional(), // Optional for self-entry
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/, "Start time must be in HH:MM format"),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/, "End time must be in HH:MM format"),
+  break_duration: z.number().min(0).max(240).default(0), // Break in minutes
+  project_id: z.number().int().positive().optional(),
+  task_id: z.number().int().positive().optional(),
+  description: z.string().max(500).optional(),
+  location: z.string().max(200).optional(),
+  is_overtime: z.boolean().default(false),
+  overtime_reason: z.string().max(300).optional(),
+});
+
+export const updateTimeEntrySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/, "Start time must be in HH:MM format").optional(),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/, "End time must be in HH:MM format").optional(),
+  break_duration: z.number().min(0).max(240).optional(),
+  project_id: z.number().int().positive().optional(),
+  task_id: z.number().int().positive().optional(),
+  description: z.string().max(500).optional(),
+  location: z.string().max(200).optional(),
+  is_overtime: z.boolean().optional(),
+  overtime_reason: z.string().max(300).optional(),
+});
+
+export const bulkTimeEntriesSchema = z.object({
+  entries: z.array(z.object({
+    id: z.number().int().positive().optional(), // For updates
+    employee_id: z.number().int().positive().optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
+    start_time: z.string().regex(/^\d{2}:\d{2}$/, "Start time must be in HH:MM format"),
+    end_time: z.string().regex(/^\d{2}:\d{2}$/, "End time must be in HH:MM format"),
+    break_duration: z.number().min(0).max(240).default(0),
+    project_id: z.number().int().positive().optional(),
+    task_id: z.number().int().positive().optional(),
+    description: z.string().max(500).optional(),
+    location: z.string().max(200).optional(),
+    is_overtime: z.boolean().default(false),
+    overtime_reason: z.string().max(300).optional(),
+  })).min(1).max(50), // Limit bulk operations
+  week_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Week start must be in YYYY-MM-DD format"),
+});
+
+export const submitTimeEntriesSchema = z.object({
+  week_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Week start date must be in YYYY-MM-DD format"),
+  employee_id: z.number().int().positive().optional(), // Optional for self-submission
+});
+
+// Time comparison types
+export type TimeComparison = {
+  employeeId: number;
+  period: string;
+  plannedHours: number;
+  actualHours: number;
+  variance: number;
+  overtimeHours: number;
+  anomalies: TimeAnomaly[];
+  suggestions: string[];
+};
+
+export type TimeAnomaly = {
+  type: 'no_planning' | 'large_variance' | 'missing_break' | 'overtime_without_approval' | 'location_mismatch';
+  severity: 'info' | 'warning' | 'error';
+  date: string;
+  description: string;
+  suggestion: string;
+};
+
 // Departments schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({
   id: true,

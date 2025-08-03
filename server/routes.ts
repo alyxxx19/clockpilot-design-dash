@@ -16,6 +16,11 @@ import {
   updatePlanningEntrySchema,
   bulkPlanningSchema,
   validatePlanningSchema,
+  timeEntryQuerySchema,
+  createTimeEntrySchema,
+  updateTimeEntrySchema,
+  bulkTimeEntriesSchema,
+  submitTimeEntriesSchema,
   type User,
   type Employee 
 } from "@shared/schema";
@@ -1253,6 +1258,754 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         error: 'Failed to detect planning conflicts',
         code: 'DETECT_CONFLICTS_ERROR'
+      });
+    }
+  });
+
+  // ========================================
+  // TIME ENTRIES API ENDPOINTS
+  // ========================================
+
+  // GET /api/time-entries - Get time entries with filters and grouping
+  app.get('/api/time-entries', authenticateToken, validateRequest(timeEntryQuerySchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { employee_id, date_from, date_to, status, group_by, page, limit } = req.query as any;
+      
+      // Check permissions - employees can only see their own time entries
+      const isAdmin = req.user!.role === 'admin';
+      let targetEmployeeId = employee_id;
+      
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        
+        // Override employee_id to only show current user's time entries
+        targetEmployeeId = currentUserEmployee.id;
+      }
+
+      const result = await storage.getTimeEntries(
+        targetEmployeeId,
+        date_from,
+        date_to,
+        status,
+        page,
+        limit
+      );
+
+      // Group entries by specified period
+      let groupedEntries = {};
+      let totalsByCategory = {};
+
+      if (group_by && result.entries.length > 0) {
+        groupedEntries = result.entries.reduce((acc, entry) => {
+          let groupKey;
+          const entryDate = new Date(entry.date);
+          
+          switch (group_by) {
+            case 'week':
+              const weekStart = new Date(entryDate);
+              weekStart.setDate(entryDate.getDate() - entryDate.getDay() + 1);
+              groupKey = weekStart.toISOString().split('T')[0];
+              break;
+            case 'month':
+              groupKey = `${entryDate.getFullYear()}-${String(entryDate.getMonth() + 1).padStart(2, '0')}`;
+              break;
+            case 'day':
+            default:
+              groupKey = entry.date;
+              break;
+          }
+          
+          if (!acc[groupKey]) {
+            acc[groupKey] = { entries: [], totalHours: 0, overtimeHours: 0 };
+          }
+          
+          acc[groupKey].entries.push(entry);
+          acc[groupKey].totalHours += entry.workingHours || 0;
+          if (entry.isOvertime) {
+            acc[groupKey].overtimeHours += entry.workingHours || 0;
+          }
+          
+          return acc;
+        }, {} as Record<string, any>);
+
+        // Calculate totals by category
+        totalsByCategory = result.entries.reduce((acc, entry) => {
+          const category = entry.projectName || 'No Project';
+          if (!acc[category]) {
+            acc[category] = { hours: 0, entries: 0 };
+          }
+          acc[category].hours += entry.workingHours || 0;
+          acc[category].entries += 1;
+          return acc;
+        }, {} as Record<string, any>);
+      }
+
+      res.json({
+        message: 'Time entries retrieved successfully',
+        data: {
+          ...result,
+          groupedBy: group_by,
+          groupedEntries,
+          totalsByCategory,
+        },
+      });
+    } catch (error) {
+      console.error('Get time entries error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch time entries',
+        code: 'FETCH_TIME_ENTRIES_ERROR'
+      });
+    }
+  });
+
+  // GET /api/time-entries/:employee_id/current - Get current day time entries
+  app.get('/api/time-entries/:employee_id/current', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.employee_id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_EMPLOYEE_ID'
+        });
+      }
+
+      // Check permissions
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only view own time entries',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      const currentEntries = await storage.getCurrentDayTimeEntries(employeeId);
+      
+      // Calculate daily totals
+      const dailyTotals = currentEntries.reduce((acc, entry) => {
+        acc.totalHours += entry.workingHours || 0;
+        if (entry.isOvertime) {
+          acc.overtimeHours += entry.workingHours || 0;
+        }
+        return acc;
+      }, { totalHours: 0, overtimeHours: 0 });
+
+      res.json({
+        message: 'Current day time entries retrieved successfully',
+        data: {
+          employeeId,
+          date: new Date().toISOString().split('T')[0],
+          entries: currentEntries,
+          dailyTotals: {
+            totalHours: Math.round(dailyTotals.totalHours * 100) / 100,
+            overtimeHours: Math.round(dailyTotals.overtimeHours * 100) / 100,
+            regularHours: Math.round((dailyTotals.totalHours - dailyTotals.overtimeHours) * 100) / 100,
+            entryCount: currentEntries.length,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Get current time entries error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch current time entries',
+        code: 'FETCH_CURRENT_TIME_ENTRIES_ERROR'
+      });
+    }
+  });
+
+  // POST /api/time-entries - Create new time entry
+  app.post('/api/time-entries', authenticateToken, validateRequest(createTimeEntrySchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const timeEntryData = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Determine target employee ID
+      let targetEmployeeId = timeEntryData.employee_id;
+      if (!isAdmin) {
+        // Non-admin users can only create entries for themselves
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        targetEmployeeId = currentUserEmployee.id;
+      } else if (!targetEmployeeId) {
+        return res.status(400).json({
+          error: 'Employee ID is required for admin users',
+          code: 'EMPLOYEE_ID_REQUIRED'
+        });
+      }
+
+      // Validate overlap
+      const overlapValidation = await storage.validateTimeEntryOverlap(
+        targetEmployeeId,
+        timeEntryData.date,
+        timeEntryData.start_time,
+        timeEntryData.end_time
+      );
+
+      if (!overlapValidation.valid) {
+        return res.status(409).json({
+          error: 'Time entry conflicts detected',
+          code: 'TIME_ENTRY_CONFLICTS',
+          conflicts: overlapValidation.conflicts,
+        });
+      }
+
+      // Calculate working hours
+      const workingHours = storage.calculateWorkingHours(
+        timeEntryData.start_time,
+        timeEntryData.end_time,
+        timeEntryData.break_duration || 0
+      );
+
+      // Calculate overtime if applicable
+      const overtimeCalculation = await storage.calculateOvertimeHours(
+        targetEmployeeId,
+        timeEntryData.date,
+        workingHours
+      );
+
+      // Create entry with calculated values
+      const entryToCreate = {
+        employee_id: targetEmployeeId,
+        date: timeEntryData.date,
+        start_time: timeEntryData.start_time,
+        end_time: timeEntryData.end_time,
+        break_duration: timeEntryData.break_duration || 0,
+        project_id: timeEntryData.project_id,
+        task_id: timeEntryData.task_id,
+        description: timeEntryData.description,
+        location: timeEntryData.location,
+        is_overtime: timeEntryData.is_overtime || overtimeCalculation.overtimeHours > 0,
+        overtime_reason: timeEntryData.overtime_reason,
+        status: 'draft',
+      };
+
+      const createdEntry = await storage.createTimeEntry(entryToCreate);
+
+      // Check for planning association
+      const planningEntries = await storage.getPlanningEntries(
+        timeEntryData.date,
+        timeEntryData.date,
+        targetEmployeeId
+      );
+
+      res.status(201).json({
+        message: 'Time entry created successfully',
+        data: {
+          timeEntry: createdEntry,
+          calculatedHours: {
+            workingHours: Math.round(workingHours * 100) / 100,
+            regularHours: Math.round(overtimeCalculation.regularHours * 100) / 100,
+            overtimeHours: Math.round(overtimeCalculation.overtimeHours * 100) / 100,
+          },
+          planningAssociation: planningEntries.length > 0,
+        },
+      });
+    } catch (error) {
+      console.error('Create time entry error:', error);
+      res.status(500).json({
+        error: 'Failed to create time entry',
+        code: 'CREATE_TIME_ENTRY_ERROR'
+      });
+    }
+  });
+
+  // PUT /api/time-entries/:id - Update time entry
+  app.put('/api/time-entries/:id', authenticateToken, validateRequest(updateTimeEntrySchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const entryId = parseInt(req.params.id);
+      if (isNaN(entryId)) {
+        return res.status(400).json({
+          error: 'Invalid time entry ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      const updateData = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Get existing entry to check ownership and status
+      const { entries } = await storage.getTimeEntries();
+      const existingEntry = entries.find(e => e.id === entryId);
+
+      if (!existingEntry) {
+        return res.status(404).json({
+          error: 'Time entry not found',
+          code: 'ENTRY_NOT_FOUND'
+        });
+      }
+
+      // Check if entry can be modified (only if not validated)
+      if (existingEntry.status === 'validated') {
+        return res.status(403).json({
+          error: 'Cannot modify validated time entry',
+          code: 'ENTRY_VALIDATED'
+        });
+      }
+
+      // Check permissions
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== existingEntry.employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only update own time entries',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      // Validate overlap if changing time
+      if (updateData.start_time || updateData.end_time || updateData.date) {
+        const targetDate = updateData.date || existingEntry.date;
+        const targetStartTime = updateData.start_time || existingEntry.startTime;
+        const targetEndTime = updateData.end_time || existingEntry.endTime;
+
+        const overlapValidation = await storage.validateTimeEntryOverlap(
+          existingEntry.employeeId,
+          targetDate,
+          targetStartTime,
+          targetEndTime,
+          entryId // Exclude current entry from overlap check
+        );
+
+        if (!overlapValidation.valid) {
+          return res.status(409).json({
+            error: 'Time entry conflicts detected',
+            code: 'TIME_ENTRY_CONFLICTS',
+            conflicts: overlapValidation.conflicts,
+          });
+        }
+      }
+
+      // Recalculate overtime if time changes
+      let overtimeCalculation = null;
+      if (updateData.start_time || updateData.end_time || updateData.break_duration !== undefined) {
+        const newStartTime = updateData.start_time || existingEntry.startTime;
+        const newEndTime = updateData.end_time || existingEntry.endTime;
+        const newBreakDuration = updateData.break_duration !== undefined ? updateData.break_duration : existingEntry.breakDuration;
+
+        const workingHours = storage.calculateWorkingHours(newStartTime, newEndTime, newBreakDuration);
+        overtimeCalculation = await storage.calculateOvertimeHours(
+          existingEntry.employeeId,
+          updateData.date || existingEntry.date,
+          workingHours
+        );
+
+        // Auto-update overtime flag if overtime hours calculated
+        if (overtimeCalculation.overtimeHours > 0 && !updateData.is_overtime) {
+          updateData.is_overtime = true;
+        }
+      }
+
+      const updatedEntry = await storage.updateTimeEntry(entryId, updateData);
+      
+      if (!updatedEntry) {
+        return res.status(500).json({
+          error: 'Failed to update time entry',
+          code: 'UPDATE_FAILED'
+        });
+      }
+
+      res.json({
+        message: 'Time entry updated successfully',
+        data: {
+          timeEntry: updatedEntry,
+          recalculatedHours: overtimeCalculation ? {
+            regularHours: Math.round(overtimeCalculation.regularHours * 100) / 100,
+            overtimeHours: Math.round(overtimeCalculation.overtimeHours * 100) / 100,
+          } : null,
+        },
+      });
+    } catch (error) {
+      console.error('Update time entry error:', error);
+      res.status(500).json({
+        error: 'Failed to update time entry',
+        code: 'UPDATE_TIME_ENTRY_ERROR'
+      });
+    }
+  });
+
+  // DELETE /api/time-entries/:id - Delete time entry (draft only)
+  app.delete('/api/time-entries/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const entryId = parseInt(req.params.id);
+      if (isNaN(entryId)) {
+        return res.status(400).json({
+          error: 'Invalid time entry ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      const isAdmin = req.user!.role === 'admin';
+
+      // Get existing entry to check ownership and status
+      const { entries } = await storage.getTimeEntries();
+      const existingEntry = entries.find(e => e.id === entryId);
+
+      if (!existingEntry) {
+        return res.status(404).json({
+          error: 'Time entry not found',
+          code: 'ENTRY_NOT_FOUND'
+        });
+      }
+
+      // Check if entry can be deleted (only draft status)
+      if (existingEntry.status !== 'draft') {
+        return res.status(403).json({
+          error: 'Can only delete draft time entries',
+          code: 'INVALID_STATUS_FOR_DELETION'
+        });
+      }
+
+      // Check permissions
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== existingEntry.employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only delete own time entries',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      const deleted = await storage.deleteTimeEntry(entryId);
+      
+      if (!deleted) {
+        return res.status(500).json({
+          error: 'Failed to delete time entry',
+          code: 'DELETE_FAILED'
+        });
+      }
+
+      res.json({
+        message: 'Time entry deleted successfully',
+        data: { deletedEntryId: entryId },
+      });
+    } catch (error) {
+      console.error('Delete time entry error:', error);
+      res.status(500).json({
+        error: 'Failed to delete time entry',
+        code: 'DELETE_TIME_ENTRY_ERROR'
+      });
+    }
+  });
+
+  // POST /api/time-entries/bulk - Bulk save weekly time entries
+  app.post('/api/time-entries/bulk', authenticateToken, validateRequest(bulkTimeEntriesSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { entries, week_start } = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Determine target employee ID and validate permissions
+      let targetEmployeeId;
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        targetEmployeeId = currentUserEmployee.id;
+        
+        // Ensure all entries are for the current user
+        const invalidEntries = entries.filter((e: any) => e.employee_id && e.employee_id !== targetEmployeeId);
+        if (invalidEntries.length > 0) {
+          return res.status(403).json({
+            error: 'Cannot create time entries for other employees',
+            code: 'INVALID_EMPLOYEE_ENTRIES'
+          });
+        }
+      }
+
+      // Separate creates and updates
+      const createEntries = entries.filter((e: any) => !e.id);
+      const updateEntries = entries.filter((e: any) => e.id);
+
+      // Validate all entries for overlaps and consistency
+      const validationResults = [];
+      for (const entry of entries) {
+        const empId = entry.employee_id || targetEmployeeId;
+        
+        const overlapValidation = await storage.validateTimeEntryOverlap(
+          empId,
+          entry.date,
+          entry.start_time,
+          entry.end_time,
+          entry.id // Exclude self for updates
+        );
+        
+        if (!overlapValidation.valid) {
+          validationResults.push({
+            entry,
+            conflicts: overlapValidation.conflicts,
+          });
+        }
+      }
+
+      if (validationResults.length > 0) {
+        return res.status(409).json({
+          error: 'Multiple time entry conflicts detected',
+          code: 'BULK_TIME_ENTRY_CONFLICTS',
+          conflicts: validationResults,
+        });
+      }
+
+      // Execute bulk operations in transaction-like manner
+      const results = {
+        created: [],
+        updated: [],
+        calculatedHours: [],
+      };
+
+      if (createEntries.length > 0) {
+        const entriesToCreate = createEntries.map((e: any) => ({
+          employee_id: e.employee_id || targetEmployeeId,
+          date: e.date,
+          start_time: e.start_time,
+          end_time: e.end_time,
+          break_duration: e.break_duration || 0,
+          project_id: e.project_id,
+          task_id: e.task_id,
+          description: e.description,
+          location: e.location,
+          is_overtime: e.is_overtime || false,
+          overtime_reason: e.overtime_reason,
+          status: 'draft',
+        }));
+
+        const createdEntries = await storage.bulkCreateTimeEntries(entriesToCreate);
+        results.created = createdEntries;
+
+        // Calculate hours for created entries
+        for (const entry of createdEntries) {
+          const workingHours = storage.calculateWorkingHours(
+            entry.start_time,
+            entry.end_time,
+            entry.break_duration
+          );
+          const overtimeCalc = await storage.calculateOvertimeHours(
+            entry.employee_id,
+            entry.date,
+            workingHours
+          );
+          results.calculatedHours.push({
+            entryId: entry.id,
+            workingHours: Math.round(workingHours * 100) / 100,
+            ...overtimeCalc,
+          });
+        }
+      }
+
+      if (updateEntries.length > 0) {
+        const updatedEntries = await storage.bulkUpdateTimeEntries(
+          updateEntries.map((e: any) => ({
+            id: e.id,
+            data: {
+              date: e.date,
+              start_time: e.start_time,
+              end_time: e.end_time,
+              break_duration: e.break_duration,
+              project_id: e.project_id,
+              task_id: e.task_id,
+              description: e.description,
+              location: e.location,
+              is_overtime: e.is_overtime,
+              overtime_reason: e.overtime_reason,
+            },
+          }))
+        );
+        results.updated = updatedEntries;
+      }
+
+      // Compare with planning for the week
+      const weekStartDate = new Date(week_start);
+      const weekEndDate = new Date(weekStartDate);
+      weekEndDate.setDate(weekEndDate.getDate() + 6);
+      const weekEnd = weekEndDate.toISOString().split('T')[0];
+
+      const planningComparison = await storage.compareTimeWithPlanning(
+        targetEmployeeId || entries[0]?.employee_id,
+        week_start,
+        weekEnd
+      );
+
+      res.status(201).json({
+        message: 'Bulk time entries operation completed successfully',
+        data: {
+          ...results,
+          weekStart: week_start,
+          planningComparison: planningComparison.summary,
+          summary: {
+            totalProcessed: entries.length,
+            created: results.created.length,
+            updated: results.updated.length,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Bulk time entries error:', error);
+      res.status(500).json({
+        error: 'Failed to process bulk time entries operation',
+        code: 'BULK_TIME_ENTRIES_ERROR'
+      });
+    }
+  });
+
+  // POST /api/time-entries/submit - Submit weekly time entries for validation
+  app.post('/api/time-entries/submit', authenticateToken, validateRequest(submitTimeEntriesSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const { week_start_date, employee_id } = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Determine target employee ID
+      let targetEmployeeId = employee_id;
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        targetEmployeeId = currentUserEmployee.id;
+      } else if (!targetEmployeeId) {
+        return res.status(400).json({
+          error: 'Employee ID is required for admin users',
+          code: 'EMPLOYEE_ID_REQUIRED'
+        });
+      }
+
+      // Verify completeness and submit
+      const submissionResult = await storage.submitWeeklyTimeEntries(targetEmployeeId, week_start_date);
+
+      if (submissionResult.errors.length > 0 && submissionResult.submitted === 0) {
+        return res.status(400).json({
+          error: 'Failed to submit time entries',
+          code: 'SUBMISSION_FAILED',
+          details: submissionResult.errors,
+        });
+      }
+
+      // Get weekly summary after submission
+      const weekSummary = await storage.getTimeEntriesSummary(targetEmployeeId, 'current_week');
+      
+      // Detect any anomalies in the submitted week
+      const anomalies = await storage.detectTimeAnomalies(targetEmployeeId, week_start_date);
+
+      res.json({
+        message: submissionResult.submitted > 0 ? 'Time entries submitted successfully' : 'No entries to submit',
+        data: {
+          submitted: submissionResult.submitted,
+          errors: submissionResult.errors,
+          weekSummary,
+          anomalies: anomalies.length > 0 ? anomalies : null,
+        },
+        warnings: submissionResult.errors.length > 0 ? submissionResult.errors : null,
+      });
+    } catch (error) {
+      console.error('Submit time entries error:', error);
+      res.status(500).json({
+        error: 'Failed to submit time entries',
+        code: 'SUBMIT_TIME_ENTRIES_ERROR'
+      });
+    }
+  });
+
+  // GET /api/time-entries/compare/:employee_id - Compare planning vs actual time
+  app.get('/api/time-entries/compare/:employee_id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.employee_id);
+      const { date_from, date_to } = req.query;
+
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_EMPLOYEE_ID'
+        });
+      }
+
+      // Check permissions
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only view own time comparison',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      // Default to current week if no dates provided
+      const defaultDateFrom = date_from as string || (() => {
+        const now = new Date();
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay() + 1);
+        return weekStart.toISOString().split('T')[0];
+      })();
+
+      const defaultDateTo = date_to as string || (() => {
+        const weekStart = new Date(defaultDateFrom);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        return weekEnd.toISOString().split('T')[0];
+      })();
+
+      const comparison = await storage.compareTimeWithPlanning(employeeId, defaultDateFrom, defaultDateTo);
+      
+      // Detect anomalies for the period
+      const anomalies = await storage.detectTimeAnomalies(employeeId, defaultDateFrom, defaultDateTo);
+      
+      // Generate suggestions based on analysis
+      const suggestions = [];
+      if (comparison.summary.totalVariance > 5) {
+        suggestions.push('Large time variance detected - review planning accuracy');
+      }
+      if (comparison.summary.totalOvertimeHours > 0) {
+        suggestions.push('Overtime recorded - ensure proper authorization');
+      }
+      if (anomalies.some(a => a.type === 'no_planning')) {
+        suggestions.push('Time entries without planning - verify work authorization');
+      }
+      if (comparison.summary.complianceRate < 80) {
+        suggestions.push('Low planning compliance - improve time tracking accuracy');
+      }
+
+      res.json({
+        message: 'Time comparison analysis completed',
+        data: {
+          ...comparison,
+          anomalies,
+          suggestions,
+          analysis: {
+            complianceGrade: comparison.summary.complianceRate >= 90 ? 'Excellent' : 
+                            comparison.summary.complianceRate >= 80 ? 'Good' : 
+                            comparison.summary.complianceRate >= 70 ? 'Fair' : 'Poor',
+            overtimeRate: comparison.summary.totalActualHours > 0 ? 
+                         Math.round((comparison.summary.totalOvertimeHours / comparison.summary.totalActualHours) * 100) : 0,
+            planningAccuracy: comparison.summary.totalPlannedHours > 0 ? 
+                             Math.round((1 - Math.abs(comparison.summary.totalVariance) / comparison.summary.totalPlannedHours) * 100) : 0,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Compare time entries error:', error);
+      res.status(500).json({
+        error: 'Failed to compare time entries',
+        code: 'COMPARE_TIME_ENTRIES_ERROR'
       });
     }
   });

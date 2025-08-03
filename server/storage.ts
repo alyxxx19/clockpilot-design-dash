@@ -96,6 +96,34 @@ export interface IStorage {
     templateId?: number
   ): Promise<PlanningEntry[]>;
 
+  // Time entries operations
+  getTimeEntries(
+    employeeId?: number,
+    dateFrom?: string,
+    dateTo?: string,
+    status?: string,
+    page?: number,
+    limit?: number
+  ): Promise<{ entries: any[]; total: number; page: number; totalPages: number }>;
+  getTimeEntriesByEmployee(employeeId: number, date?: string): Promise<any[]>;
+  getCurrentDayTimeEntries(employeeId: number): Promise<any[]>;
+  createTimeEntry(entry: InsertTimeEntry): Promise<TimeEntry>;
+  updateTimeEntry(id: number, entry: Partial<InsertTimeEntry>): Promise<TimeEntry | undefined>;
+  deleteTimeEntry(id: number): Promise<boolean>;
+  bulkCreateTimeEntries(entries: InsertTimeEntry[]): Promise<TimeEntry[]>;
+  bulkUpdateTimeEntries(entries: { id: number; data: Partial<InsertTimeEntry> }[]): Promise<TimeEntry[]>;
+  
+  // Time entry validation and business logic
+  validateTimeEntryOverlap(employeeId: number, date: string, startTime: string, endTime: string, excludeId?: number): Promise<{ valid: boolean; conflicts: string[] }>;
+  calculateWorkingHours(startTime: string, endTime: string, breakDuration: number): number;
+  calculateOvertimeHours(employeeId: number, date: string, totalHours: number): Promise<{ regularHours: number; overtimeHours: number }>;
+  submitWeeklyTimeEntries(employeeId: number, weekStart: string): Promise<{ submitted: number; errors: string[] }>;
+  
+  // Time comparison and analysis
+  compareTimeWithPlanning(employeeId: number, dateFrom: string, dateTo: string): Promise<any>;
+  detectTimeAnomalies(employeeId: number, dateFrom?: string, dateTo?: string): Promise<any[]>;
+  getTimeEntriesSummary(employeeId?: number, period?: string): Promise<any>;
+
   // Departments
   getDepartment(id: number): Promise<Department | undefined>;
   getAllDepartments(): Promise<Department[]>;
@@ -1066,6 +1094,631 @@ export class DatabaseStorage implements IStorage {
     }
 
     return generatedEntries;
+  }
+
+  // ========================================
+  // TIME ENTRIES OPERATIONS
+  // ========================================
+
+  async getTimeEntries(
+    employeeId?: number,
+    dateFrom?: string,
+    dateTo?: string,
+    status?: string,
+    page: number = 1,
+    limit: number = 20
+  ): Promise<{ entries: any[]; total: number; page: number; totalPages: number }> {
+    let query = db
+      .select({
+        id: timeEntries.id,
+        employeeId: timeEntries.employee_id,
+        date: timeEntries.date,
+        startTime: timeEntries.start_time,
+        endTime: timeEntries.end_time,
+        breakDuration: timeEntries.break_duration,
+        projectId: timeEntries.project_id,
+        taskId: timeEntries.task_id,
+        description: timeEntries.description,
+        location: timeEntries.location,
+        isOvertime: timeEntries.is_overtime,
+        overtimeReason: timeEntries.overtime_reason,
+        status: timeEntries.status,
+        createdAt: timeEntries.created_at,
+        updatedAt: timeEntries.updated_at,
+        // Employee info
+        employeeFirstName: employees.first_name,
+        employeeLastName: employees.last_name,
+        employeeNumber: employees.employee_number,
+        // Project info
+        projectName: projects.name,
+        // Task info  
+        taskName: tasks.name,
+        // Calculated hours
+        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
+      })
+      .from(timeEntries)
+      .leftJoin(employees, eq(timeEntries.employee_id, employees.id))
+      .leftJoin(projects, eq(timeEntries.project_id, projects.id))
+      .leftJoin(tasks, eq(timeEntries.task_id, tasks.id));
+
+    const conditions = [];
+
+    if (employeeId) {
+      conditions.push(eq(timeEntries.employee_id, employeeId));
+    }
+
+    if (dateFrom) {
+      conditions.push(gte(timeEntries.date, dateFrom));
+    }
+
+    if (dateTo) {
+      conditions.push(lte(timeEntries.date, dateTo));
+    }
+
+    if (status) {
+      conditions.push(eq(timeEntries.status, status));
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    // Get total count
+    const totalResult = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(timeEntries)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+    const total = totalResult[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+    const offset = (page - 1) * limit;
+
+    // Get paginated results
+    const entries = await query
+      .orderBy(desc(timeEntries.date), desc(timeEntries.start_time))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      entries,
+      total,
+      page,
+      totalPages,
+    };
+  }
+
+  async getTimeEntriesByEmployee(employeeId: number, date?: string): Promise<any[]> {
+    let query = db
+      .select({
+        id: timeEntries.id,
+        date: timeEntries.date,
+        startTime: timeEntries.start_time,
+        endTime: timeEntries.end_time,
+        breakDuration: timeEntries.break_duration,
+        projectId: timeEntries.project_id,
+        taskId: timeEntries.task_id,
+        description: timeEntries.description,
+        location: timeEntries.location,
+        isOvertime: timeEntries.is_overtime,
+        overtimeReason: timeEntries.overtime_reason,
+        status: timeEntries.status,
+        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
+        projectName: projects.name,
+        taskName: tasks.name,
+      })
+      .from(timeEntries)
+      .leftJoin(projects, eq(timeEntries.project_id, projects.id))
+      .leftJoin(tasks, eq(timeEntries.task_id, tasks.id))
+      .where(eq(timeEntries.employee_id, employeeId));
+
+    if (date) {
+      query = query.where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          eq(timeEntries.date, date)
+        )
+      );
+    }
+
+    return await query.orderBy(timeEntries.date, timeEntries.start_time);
+  }
+
+  async getCurrentDayTimeEntries(employeeId: number): Promise<any[]> {
+    const today = new Date().toISOString().split('T')[0];
+    return await this.getTimeEntriesByEmployee(employeeId, today);
+  }
+
+  async createTimeEntry(entry: InsertTimeEntry): Promise<TimeEntry> {
+    const [newEntry] = await db
+      .insert(timeEntries)
+      .values(entry)
+      .returning();
+    return newEntry;
+  }
+
+  async updateTimeEntry(id: number, entry: Partial<InsertTimeEntry>): Promise<TimeEntry | undefined> {
+    const [updatedEntry] = await db
+      .update(timeEntries)
+      .set({ ...entry, updated_at: new Date() })
+      .where(eq(timeEntries.id, id))
+      .returning();
+    return updatedEntry || undefined;
+  }
+
+  async deleteTimeEntry(id: number): Promise<boolean> {
+    const result = await db
+      .delete(timeEntries)
+      .where(eq(timeEntries.id, id));
+    return result.rowCount > 0;
+  }
+
+  async bulkCreateTimeEntries(entries: InsertTimeEntry[]): Promise<TimeEntry[]> {
+    const newEntries = await db
+      .insert(timeEntries)
+      .values(entries)
+      .returning();
+    return newEntries;
+  }
+
+  async bulkUpdateTimeEntries(updates: { id: number; data: Partial<InsertTimeEntry> }[]): Promise<TimeEntry[]> {
+    const results = [];
+    
+    for (const update of updates) {
+      const result = await this.updateTimeEntry(update.id, update.data);
+      if (result) {
+        results.push(result);
+      }
+    }
+    
+    return results;
+  }
+
+  // ========================================
+  // TIME ENTRY VALIDATION AND BUSINESS LOGIC
+  // ========================================
+
+  async validateTimeEntryOverlap(
+    employeeId: number, 
+    date: string, 
+    startTime: string, 
+    endTime: string, 
+    excludeId?: number
+  ): Promise<{ valid: boolean; conflicts: string[] }> {
+    const conflicts = [];
+
+    // Get existing entries for the same day
+    let query = db
+      .select({
+        id: timeEntries.id,
+        startTime: timeEntries.start_time,
+        endTime: timeEntries.end_time,
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          eq(timeEntries.date, date)
+        )
+      );
+
+    if (excludeId) {
+      query = query.where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          eq(timeEntries.date, date),
+          ne(timeEntries.id, excludeId)
+        )
+      );
+    }
+
+    const existingEntries = await query;
+
+    // Check for overlaps
+    const newStart = new Date(`1970-01-01T${startTime}:00`);
+    const newEnd = new Date(`1970-01-01T${endTime}:00`);
+
+    for (const existing of existingEntries) {
+      if (existing.startTime && existing.endTime) {
+        const existingStart = new Date(`1970-01-01T${existing.startTime}:00`);
+        const existingEnd = new Date(`1970-01-01T${existing.endTime}:00`);
+        
+        if (newStart < existingEnd && newEnd > existingStart) {
+          conflicts.push(`Time overlap with existing entry ${existing.startTime}-${existing.endTime}`);
+        }
+      }
+    }
+
+    return {
+      valid: conflicts.length === 0,
+      conflicts,
+    };
+  }
+
+  calculateWorkingHours(startTime: string, endTime: string, breakDuration: number): number {
+    const start = new Date(`1970-01-01T${startTime}:00`);
+    const end = new Date(`1970-01-01T${endTime}:00`);
+    const totalMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+    const workingMinutes = totalMinutes - breakDuration;
+    return Math.max(0, workingMinutes / 60); // Hours
+  }
+
+  async calculateOvertimeHours(
+    employeeId: number, 
+    date: string, 
+    totalHours: number
+  ): Promise<{ regularHours: number; overtimeHours: number }> {
+    // Get daily legal limit (10h) and weekly context
+    const dailyLimit = 10;
+    
+    // Calculate week start for weekly overtime calculation
+    const dateObj = new Date(date);
+    const weekStart = new Date(dateObj);
+    weekStart.setDate(dateObj.getDate() - dateObj.getDay() + 1); // Monday
+    const weekStartStr = weekStart.toISOString().split('T')[0];
+    
+    // Get weekly hours so far (excluding current entry)
+    const weeklyEntries = await db
+      .select({
+        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, weekStartStr),
+          lt(timeEntries.date, date), // Before current date
+          eq(timeEntries.status, 'validated')
+        )
+      );
+
+    const weeklyHoursBeforeToday = weeklyEntries.reduce((sum, entry) => sum + (entry.workingHours || 0), 0);
+    const totalWeeklyHours = weeklyHoursBeforeToday + totalHours;
+
+    // Calculate overtime
+    let dailyOvertime = Math.max(0, totalHours - dailyLimit);
+    let weeklyOvertime = Math.max(0, totalWeeklyHours - 48); // 48h weekly limit
+    
+    // Use the maximum of daily or weekly overtime
+    const overtimeHours = Math.max(dailyOvertime, weeklyOvertime);
+    const regularHours = totalHours - overtimeHours;
+
+    return {
+      regularHours: Math.max(0, regularHours),
+      overtimeHours: Math.max(0, overtimeHours),
+    };
+  }
+
+  async submitWeeklyTimeEntries(employeeId: number, weekStart: string): Promise<{ submitted: number; errors: string[] }> {
+    const errors = [];
+    
+    // Calculate week end
+    const weekStartDate = new Date(weekStart);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekEndDate.getDate() + 6);
+    const weekEnd = weekEndDate.toISOString().split('T')[0];
+
+    // Get all draft time entries for the week
+    const draftEntries = await db
+      .select()
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, weekStart),
+          lte(timeEntries.date, weekEnd),
+          eq(timeEntries.status, 'draft')
+        )
+      );
+
+    if (draftEntries.length === 0) {
+      errors.push('No draft entries found for the specified week');
+      return { submitted: 0, errors };
+    }
+
+    // Validate completeness (should have entries for working days)
+    const workingDays = [];
+    const current = new Date(weekStartDate);
+    while (current <= weekEndDate) {
+      const dayOfWeek = current.getDay();
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) { // Monday to Friday
+        workingDays.push(current.toISOString().split('T')[0]);
+      }
+      current.setDate(current.getDate() + 1);
+    }
+
+    const entriesByDate = draftEntries.reduce((acc, entry) => {
+      if (!acc[entry.date]) acc[entry.date] = [];
+      acc[entry.date].push(entry);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    // Check for missing working days (optional validation)
+    const missingDays = workingDays.filter(day => !entriesByDate[day]);
+    if (missingDays.length > 0) {
+      errors.push(`Missing time entries for working days: ${missingDays.join(', ')}`);
+    }
+
+    // Submit all valid entries
+    let submitted = 0;
+    for (const entry of draftEntries) {
+      try {
+        await this.updateTimeEntry(entry.id, { status: 'submitted' });
+        submitted++;
+      } catch (error) {
+        errors.push(`Failed to submit entry ${entry.id}: ${error}`);
+      }
+    }
+
+    return { submitted, errors };
+  }
+
+  // ========================================
+  // TIME COMPARISON AND ANALYSIS
+  // ========================================
+
+  async compareTimeWithPlanning(employeeId: number, dateFrom: string, dateTo: string): Promise<any> {
+    // Get time entries
+    const timeEntriesData = await db
+      .select({
+        date: timeEntries.date,
+        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
+        isOvertime: timeEntries.is_overtime,
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, dateFrom),
+          lte(timeEntries.date, dateTo)
+        )
+      );
+
+    // Get planning entries
+    const planningData = await this.getPlanningEntries(dateFrom, dateTo, employeeId);
+
+    // Group and compare by date
+    const comparison = [];
+    const dateSet = new Set([
+      ...timeEntriesData.map(e => e.date),
+      ...planningData.map(e => e.date)
+    ]);
+
+    let totalPlannedHours = 0;
+    let totalActualHours = 0;
+    let totalOvertimeHours = 0;
+
+    for (const date of Array.from(dateSet).sort()) {
+      const dayTimeEntries = timeEntriesData.filter(e => e.date === date);
+      const dayPlanningEntries = planningData.filter(e => e.date === date);
+
+      const actualHours = dayTimeEntries.reduce((sum, entry) => sum + (entry.workingHours || 0), 0);
+      const overtimeHours = dayTimeEntries
+        .filter(entry => entry.isOvertime)
+        .reduce((sum, entry) => sum + (entry.workingHours || 0), 0);
+
+      let plannedHours = 0;
+      dayPlanningEntries.forEach(entry => {
+        if (entry.startTime && entry.endTime && entry.type === 'work') {
+          const start = new Date(`1970-01-01T${entry.startTime}:00`);
+          const end = new Date(`1970-01-01T${entry.endTime}:00`);
+          plannedHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+        }
+      });
+
+      const variance = actualHours - plannedHours;
+
+      comparison.push({
+        date,
+        plannedHours: Math.round(plannedHours * 100) / 100,
+        actualHours: Math.round(actualHours * 100) / 100,
+        overtimeHours: Math.round(overtimeHours * 100) / 100,
+        variance: Math.round(variance * 100) / 100,
+        hasPlanning: dayPlanningEntries.length > 0,
+        hasTimeEntries: dayTimeEntries.length > 0,
+      });
+
+      totalPlannedHours += plannedHours;
+      totalActualHours += actualHours;
+      totalOvertimeHours += overtimeHours;
+    }
+
+    const totalVariance = totalActualHours - totalPlannedHours;
+
+    return {
+      employeeId,
+      period: { from: dateFrom, to: dateTo },
+      dailyComparison: comparison,
+      summary: {
+        totalPlannedHours: Math.round(totalPlannedHours * 100) / 100,
+        totalActualHours: Math.round(totalActualHours * 100) / 100,
+        totalOvertimeHours: Math.round(totalOvertimeHours * 100) / 100,
+        totalVariance: Math.round(totalVariance * 100) / 100,
+        complianceRate: totalPlannedHours > 0 ? Math.round((1 - Math.abs(totalVariance) / totalPlannedHours) * 100) : 0,
+      },
+    };
+  }
+
+  async detectTimeAnomalies(employeeId: number, dateFrom?: string, dateTo?: string): Promise<any[]> {
+    const anomalies = [];
+    
+    // Default to current week if no dates provided
+    const defaultStart = dateFrom || new Date().toISOString().split('T')[0];
+    const defaultEnd = dateTo || (() => {
+      const end = new Date(defaultStart);
+      end.setDate(end.getDate() + 6);
+      return end.toISOString().split('T')[0];
+    })();
+
+    // Get time entries and planning for the period
+    const timeEntriesData = await this.getTimeEntriesByEmployee(employeeId, undefined);
+    const planningData = await this.getPlanningEntries(defaultStart, defaultEnd, employeeId);
+    
+    // Filter time entries by date range
+    const filteredTimeEntries = timeEntriesData.filter(entry => 
+      entry.date >= defaultStart && entry.date <= defaultEnd
+    );
+
+    // Anomaly 1: Time entries without corresponding planning
+    for (const timeEntry of filteredTimeEntries) {
+      const hasPlanning = planningData.some(planning => 
+        planning.date === timeEntry.date && planning.type === 'work'
+      );
+      
+      if (!hasPlanning) {
+        anomalies.push({
+          type: 'no_planning',
+          severity: 'warning',
+          date: timeEntry.date,
+          description: `Time entry recorded without corresponding planning`,
+          suggestion: 'Create planning entry or verify if work was authorized',
+        });
+      }
+    }
+
+    // Anomaly 2: Large variance between planned and actual hours
+    const comparison = await this.compareTimeWithPlanning(employeeId, defaultStart, defaultEnd);
+    for (const day of comparison.dailyComparison) {
+      const varianceThreshold = 2; // 2 hours
+      if (Math.abs(day.variance) > varianceThreshold && day.hasPlanning) {
+        anomalies.push({
+          type: 'large_variance',
+          severity: day.variance > 0 ? 'warning' : 'info',
+          date: day.date,
+          description: `Large variance: ${day.variance > 0 ? '+' : ''}${day.variance}h vs planned`,
+          suggestion: day.variance > 0 
+            ? 'Consider if overtime was authorized'
+            : 'Check if early departure was approved',
+        });
+      }
+    }
+
+    // Anomaly 3: Missing breaks for long shifts
+    for (const timeEntry of filteredTimeEntries) {
+      if (timeEntry.workingHours > 6 && timeEntry.breakDuration < 30) {
+        anomalies.push({
+          type: 'missing_break',
+          severity: 'warning',
+          date: timeEntry.date,
+          description: `${timeEntry.workingHours}h shift with only ${timeEntry.breakDuration}min break`,
+          suggestion: 'Ensure proper break time for shifts over 6 hours',
+        });
+      }
+    }
+
+    // Anomaly 4: Overtime without approval
+    for (const timeEntry of filteredTimeEntries) {
+      if (timeEntry.isOvertime && !timeEntry.overtimeReason) {
+        anomalies.push({
+          type: 'overtime_without_approval',
+          severity: 'error',
+          date: timeEntry.date,
+          description: 'Overtime marked without justification',
+          suggestion: 'Add overtime reason or verify authorization',
+        });
+      }
+    }
+
+    return anomalies;
+  }
+
+  async getTimeEntriesSummary(employeeId?: number, period: string = 'current_month'): Promise<any> {
+    // Calculate date range based on period
+    let startDate: string;
+    let endDate: string;
+    const now = new Date();
+
+    switch (period) {
+      case 'current_week':
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay() + 1); // Monday
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6); // Sunday
+        startDate = weekStart.toISOString().split('T')[0];
+        endDate = weekEnd.toISOString().split('T')[0];
+        break;
+      case 'current_month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        break;
+      case 'last_month':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+        endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    }
+
+    // Build query
+    let query = db
+      .select({
+        totalHours: sql<number>`SUM(EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0))`,
+        totalEntries: sql<number>`COUNT(*)`,
+        overtimeHours: sql<number>`SUM(CASE WHEN is_overtime THEN EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0) ELSE 0 END)`,
+        avgDailyHours: sql<number>`AVG(EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0))`,
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          gte(timeEntries.date, startDate),
+          lte(timeEntries.date, endDate),
+          ne(timeEntries.status, 'rejected')
+        )
+      );
+
+    if (employeeId) {
+      query = query.where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, startDate),
+          lte(timeEntries.date, endDate),
+          ne(timeEntries.status, 'rejected')
+        )
+      );
+    }
+
+    const [summary] = await query;
+
+    // Get status breakdown
+    let statusQuery = db
+      .select({
+        status: timeEntries.status,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          gte(timeEntries.date, startDate),
+          lte(timeEntries.date, endDate)
+        )
+      )
+      .groupBy(timeEntries.status);
+
+    if (employeeId) {
+      statusQuery = statusQuery.where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, startDate),
+          lte(timeEntries.date, endDate)
+        )
+      );
+    }
+
+    const statusBreakdown = await statusQuery;
+
+    return {
+      period: { start: startDate, end: endDate, type: period },
+      summary: {
+        totalHours: Math.round((summary?.totalHours || 0) * 100) / 100,
+        totalEntries: summary?.totalEntries || 0,
+        overtimeHours: Math.round((summary?.overtimeHours || 0) * 100) / 100,
+        avgDailyHours: Math.round((summary?.avgDailyHours || 0) * 100) / 100,
+      },
+      statusBreakdown: statusBreakdown.reduce((acc, item) => {
+        acc[item.status] = item.count;
+        return acc;
+      }, {} as Record<string, number>),
+    };
   }
 
   // ========================================
