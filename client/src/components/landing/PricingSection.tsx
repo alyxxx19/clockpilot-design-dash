@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Check, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -57,12 +58,14 @@ export const PricingSection: React.FC = () => {
               ))}
             </div>
             
-            <Button 
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 text-lg font-semibold"
-              data-testid="button-start-trial"
-            >
-              Démarrer l'essai gratuit
-            </Button>
+            <Link to="/login">
+              <Button 
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 text-lg font-semibold"
+                data-testid="button-start-trial"
+              >
+                Démarrer l'essai gratuit
+              </Button>
+            </Link>
             
             <p className="text-center text-gray-600 mt-4 text-sm">
               14 jours gratuits • Sans engagement • Résiliation libre

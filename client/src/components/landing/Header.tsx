@@ -69,12 +69,14 @@ export const Header: React.FC = () => {
 
           {/* Desktop CTA */}
           <div className="hidden md:flex">
-            <Button 
-              className="bg-blue-600 hover:bg-blue-700 font-medium"
-              data-testid="header-cta-button"
-            >
-              Essai gratuit
-            </Button>
+            <Link to="/login">
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700 font-medium"
+                data-testid="header-cta-button"
+              >
+                Essai gratuit
+              </Button>
+            </Link>
           </div>
 
           {/* Mobile Menu Button */}
@@ -117,12 +119,14 @@ export const Header: React.FC = () => {
                 FAQ
               </button>
               <div className="px-4 pt-2">
-                <Button 
-                  className="w-full bg-blue-600 hover:bg-blue-700 font-medium"
-                  data-testid="mobile-cta-button"
-                >
-                  Essai gratuit
-                </Button>
+                <Link to="/login">
+                  <Button 
+                    className="w-full bg-blue-600 hover:bg-blue-700 font-medium"
+                    data-testid="mobile-cta-button"
+                  >
+                    Essai gratuit
+                  </Button>
+                </Link>
               </div>
             </nav>
           </div>

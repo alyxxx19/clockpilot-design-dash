@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Check, Shield, Zap, HeadphonesIcon, RotateCcw } from 'lucide-react';
 
@@ -39,13 +40,15 @@ export const FinalCTASection: React.FC = () => {
         </p>
         
         <div className="mb-12">
-          <Button 
-            size="lg" 
-            className="px-12 py-4 text-lg font-semibold bg-white text-blue-600 hover:bg-gray-50 shadow-lg"
-            data-testid="button-final-cta"
-          >
-            Démarrer l'essai gratuit maintenant
-          </Button>
+          <Link to="/login">
+            <Button 
+              size="lg" 
+              className="px-12 py-4 text-lg font-semibold bg-white text-blue-600 hover:bg-gray-50 shadow-lg"
+              data-testid="button-final-cta"
+            >
+              Démarrer l'essai gratuit maintenant
+            </Button>
+          </Link>
           <p className="text-blue-100 mt-3 text-sm">
             Sans carte bancaire • Configuration en 10 minutes
           </p>

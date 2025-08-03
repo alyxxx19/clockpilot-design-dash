@@ -24,13 +24,15 @@ export const HeroSection: React.FC = () => {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button 
-              size="lg" 
-              className="px-8 py-4 text-lg font-semibold bg-blue-600 hover:bg-blue-700 shadow-lg"
-              data-testid="button-free-trial"
-            >
-              Essai gratuit 14 jours
-            </Button>
+            <Link to="/login">
+              <Button 
+                size="lg" 
+                className="px-8 py-4 text-lg font-semibold bg-blue-600 hover:bg-blue-700 shadow-lg"
+                data-testid="button-free-trial"
+              >
+                Essai gratuit 14 jours
+              </Button>
+            </Link>
             <Button 
               variant="outline" 
               size="lg" 
