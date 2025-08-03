@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
+import { useNavigate } from 'react-router-dom';
 
 interface TimeSlot {
   id: string;

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
+import { useToast } from '@/hooks/use-toast';
 
 const daysOfWeek = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 const daysOfWeekFull = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
@@ -245,6 +246,7 @@ export const Planning: React.FC = () => {
   const [showComparison, setShowComparison] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const getDaysInMonth = (date: Date) => {
     return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -338,7 +340,7 @@ export const Planning: React.FC = () => {
 
   // Aller à aujourd'hui
   const goToToday = () => {
-    setSelectedDate(new Date());
+    setCurrentDate(new Date());
     toast({
       title: "Navigation",
       description: "Retour à la date d'aujourd'hui",
@@ -348,6 +350,11 @@ export const Planning: React.FC = () => {
   // Naviguer vers la saisie d'heures
   const handleTimeEntry = () => {
     navigate('/employee/time-entry');
+  };
+
+  // Naviguer vers le planning
+  const handleViewPlanning = () => {
+    navigate('/employee/planning');
   };
 
   const renderTimeSlot = (slot: PlanningShift, isAdmin: boolean) => {
