@@ -491,12 +491,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { page = 1, limit = 10, search, department, status, sortBy, sortOrder } = queryValidation.data;
+      const { 
+        page = 1, 
+        limit = 10, 
+        search, 
+        department, 
+        status, 
+        contractType,
+        managerId,
+        hiredAfter,
+        hiredBefore,
+        minWeeklyHours,
+        maxWeeklyHours,
+        hasEmail,
+        hasPhone,
+        sortBy, 
+        sortOrder 
+      } = queryValidation.data;
 
       const result = await storage.getEmployeesWithPagination(page, limit, {
         search,
         department,
         status,
+        contractType,
+        managerId,
+        hiredAfter,
+        hiredBefore,
+        minWeeklyHours,
+        maxWeeklyHours,
+        hasEmail,
+        hasPhone,
         sortBy,
         sortOrder,
       });

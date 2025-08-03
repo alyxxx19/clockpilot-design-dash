@@ -494,16 +494,32 @@ export const employeeQuerySchema = z.object({
   search: z.string().optional(),
   department: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
   status: z.enum(['active', 'inactive']).optional(),
-  sortBy: z.enum(['name', 'hire_date', 'department', 'created_at']).default('created_at'),
+  contractType: z.enum(['CDI', 'CDD', 'STAGE', 'FREELANCE', 'INTERIM']).optional(),
+  managerId: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  hiredAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  hiredBefore: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  minWeeklyHours: z.string().transform(val => parseFloat(val)).pipe(z.number().min(0)).optional(),
+  maxWeeklyHours: z.string().transform(val => parseFloat(val)).pipe(z.number().min(0)).optional(),
+  hasEmail: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  hasPhone: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  sortBy: z.enum(['name', 'hire_date', 'department', 'contract_type', 'weekly_hours', 'created_at']).default('created_at'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
 // Planning API schemas
 export const planningQuerySchema = z.object({
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format"),
-  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format"),
+  page: z.string().transform(val => parseInt(val) || 1).pipe(z.number().int().min(1)).optional(),
+  limit: z.string().transform(val => parseInt(val) || 20).pipe(z.number().int().min(1).max(100)).optional(),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Start date must be in YYYY-MM-DD format").optional(),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "End date must be in YYYY-MM-DD format").optional(),
   employee_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
   department_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  status: z.enum(['draft', 'submitted', 'validated', 'rejected']).optional(),
+  type: z.enum(['work', 'vacation', 'sick', 'training', 'meeting']).optional(),
+  hasConflicts: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  validationStatus: z.enum(['pending', 'validated', 'rejected']).optional(),
+  sortBy: z.enum(['date', 'employee', 'department', 'status', 'created_at']).default('date'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export const generatePlanningSchema = z.object({
@@ -558,7 +574,15 @@ export const timeEntryQuerySchema = z.object({
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date from must be in YYYY-MM-DD format").optional(),
   date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date to must be in YYYY-MM-DD format").optional(),
   status: z.enum(['draft', 'submitted', 'validated', 'rejected']).optional(),
+  project_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  task_id: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  hasOvertime: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  hasAnomalies: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  minHours: z.string().transform(val => parseFloat(val)).pipe(z.number().min(0)).optional(),
+  maxHours: z.string().transform(val => parseFloat(val)).pipe(z.number().min(0)).optional(),
   group_by: z.enum(['day', 'week', 'month']).default('day'),
+  sortBy: z.enum(['date', 'employee', 'hours', 'overtime', 'project', 'created_at']).default('date'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
   page: z.string().transform(val => parseInt(val) || 1).pipe(z.number().int().min(1)).optional(),
   limit: z.string().transform(val => parseInt(val) || 20).pipe(z.number().int().min(1).max(100)).optional(),
 });
@@ -663,6 +687,24 @@ export const notificationQuerySchema = z.object({
 
 export const markReadSchema = z.object({
   read: z.boolean().default(true),
+});
+
+// Tasks API schemas
+export const tasksQuerySchema = z.object({
+  page: z.string().transform(val => parseInt(val) || 1).pipe(z.number().int().min(1)).optional(),
+  limit: z.string().transform(val => parseInt(val) || 20).pipe(z.number().int().min(1).max(100)).optional(),
+  search: z.string().optional(),
+  assigneeId: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  status: z.enum(['todo', 'in_progress', 'completed', 'cancelled']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+  category: z.string().optional(),
+  projectId: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  dueAfter: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  dueBefore: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional(),
+  assignedToMe: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  overdue: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  sortBy: z.enum(['title', 'priority', 'due_date', 'status', 'assignee', 'created_at']).default('due_date'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
 });
 
 // Notification types

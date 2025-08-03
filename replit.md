@@ -1,231 +1,52 @@
 # Project Documentation
 
 ## Overview
-This is a full-stack JavaScript application built with Express.js backend and React frontend using Vite. The project follows modern web development patterns with a PostgreSQL database for data persistence.
-
-## Project Architecture
-
-### Database
-- **PostgreSQL with Neon**: Added on 2025-08-03
-- **ORM**: Drizzle ORM for type-safe database operations
-- **Schema**: Defined in `shared/schema.ts`
-- **Connection**: Configured in `server/db.ts` using Neon serverless driver
-
-### Backend
-- **Framework**: Express.js
-- **Storage**: DatabaseStorage class implementing IStorage interface
-- **Routes**: Defined in `server/routes.ts`
-- **Database Integration**: Connected to PostgreSQL via Drizzle ORM
-
-### Frontend
-- **Framework**: React with Vite
-- **Routing**: Wouter for client-side routing
-- **Styling**: Tailwind CSS with shadcn/ui components
-- **State Management**: TanStack Query for server state
-
-### Key Files
-- `shared/schema.ts`: Database schema and type definitions
-- `server/db.ts`: Database connection configuration
-- `server/storage.ts`: Data access layer with DatabaseStorage implementation
-- `server/routes.ts`: API route definitions
-- `client/src/App.tsx`: Frontend entry point
-
-## Recent Changes
-
-### 2025-08-03: Complete Database Schema Implementation
-✓ Created comprehensive database schema with 8 main tables:
-  - users: Base authentication table with email and role
-  - employees: Extended employee data with departments and hierarchy
-  - departments: Organizational structure
-  - projects: Project management with budget tracking
-  - projectAssignments: Many-to-many project-employee relationships
-  - planningEntries: Scheduling with validation workflow
-  - timeEntries: Time tracking with geolocation support
-  - tasks: Task management with priorities and status
-  - settings: Configurable system and user preferences
-  - validations: Weekly time validation tracking
-✓ Implemented comprehensive relations between all entities
-✓ Added proper indexes for performance optimization
-✓ Created Zod schemas for validation and TypeScript types
-✓ Added enums for frontend consistency
-✓ Successfully pushed schema to PostgreSQL database
-✓ Fixed circular reference issues with proper foreign key definitions
-✓ Updated storage interface with comprehensive CRUD operations
-✓ Implemented complete authentication system with JWT tokens
-
-### 2025-08-03: JWT Authentication System Implementation
-✓ Implemented complete authentication API with 5 endpoints:
-  - POST /api/auth/register: User registration with bcrypt password hashing
-  - POST /api/auth/login: Email/password authentication with JWT tokens  
-  - POST /api/auth/logout: Token invalidation with blacklist
-  - GET /api/auth/me: Protected route to get current user info
-  - POST /api/auth/refresh: JWT token renewal system
-✓ Created authentication middleware (authenticateToken) for route protection
-✓ Created authorization middleware (authorizeRole) for role-based access
-✓ Added comprehensive error handling with specific error codes
-✓ Implemented Zod validation schemas for all auth endpoints
-✓ Added token blacklist system for secure logout
-✓ Access tokens expire in 7 days, refresh tokens in 30 days
-✓ Automatic employee profile creation during registration
-✓ Protected example routes (/api/employees, /api/departments, /api/profile)
-
-### 2025-08-03: Complete Employee CRUD API Implementation
-✓ Implemented comprehensive employee management with 6 endpoints:
-  - GET /api/employees: Paginated list with filters (search, department, status, sorting)
-  - GET /api/employees/:id: Detailed employee info with manager/subordinates
-  - POST /api/employees: Create employee with auto-generated credentials
-  - PUT /api/employees/:id: Update employee (admin full access, employee limited)
-  - DELETE /api/employees/:id: Soft delete with validation checks
-  - GET /api/employees/:id/stats: Employee statistics (hours, vacation, projects)
-✓ Advanced storage operations with complex SQL queries and joins
-✓ Role-based access control (admin vs employee permissions)
-✓ Comprehensive validation using Zod schemas
-✓ Error handling with specific error codes
-✓ Pagination and filtering system for large datasets
-✓ Employee statistics calculation (weekly/monthly hours, vacation tracking)
-✓ Manager-subordinate relationship handling
-✓ Created test page for all CRUD operations
-
-### 2025-08-03: Complete Planning API Implementation
-✓ Implemented comprehensive planning management with 7 endpoints:
-  - GET /api/planning: Filtered planning entries with date grouping and totals
-  - POST /api/planning/generate: Auto-generate planning with legal constraints
-  - GET /api/planning/:employee_id/week/:date: Weekly planning with time comparison
-  - PUT /api/planning/:id: Update planning entry with conflict validation
-  - POST /api/planning/bulk: Bulk create/update with transaction safety
-  - POST /api/planning/validate: Weekly validation workflow for managers
-  - GET /api/planning/conflicts: Comprehensive conflict detection system
-✓ Business logic implementation with French legal constraints:
-  - Maximum 10h/day and 48h/week limits enforced
-  - 11-hour rest period validation between shifts
-  - 35-hour weekly average target monitoring
-  - Automatic conflict detection and resolution suggestions
-✓ Advanced planning features:
-  - Weekly planning comparison with actual time entries
-  - Bulk operations with validation and rollback capability
-  - Manager validation workflow with approval tracking
-  - Comprehensive conflict analysis with severity levels
-✓ Role-based access control for all planning operations
-✓ Real-time validation with detailed error reporting
-
-### 2025-08-03: Complete Time Entries API Implementation
-✓ Implemented comprehensive time tracking system with 8 endpoints:
-  - GET /api/time-entries: Filtered entries with grouping (day/week/month) and pagination
-  - GET /api/time-entries/:employee_id/current: Real-time current day entries with totals
-  - POST /api/time-entries: Create with auto-overlap validation and overtime calculation
-  - PUT /api/time-entries/:id: Update with conflict validation (draft/submitted only)
-  - DELETE /api/time-entries/:id: Delete draft entries with ownership validation
-  - POST /api/time-entries/bulk: Bulk weekly operations with transaction safety
-  - POST /api/time-entries/submit: Weekly submission with completeness validation
-  - GET /api/time-entries/compare/:employee_id: Planning vs actual analysis
-✓ Advanced business logic and automatic calculations:
-  - Real-time overtime calculation based on daily (10h) and weekly (48h) limits
-  - Working hours calculation with break time deduction
-  - Overlap validation preventing double-booking conflicts
-  - Planning association for authorized work verification
-✓ Anomaly detection system with 4 types:
-  - Time entries without corresponding planning (warning)
-  - Large variance between planned vs actual hours (warning/info)
-  - Missing breaks for shifts over 6 hours (warning)
-  - Overtime without proper justification (error)
-✓ Comprehensive time analysis features:
-  - Daily/weekly/monthly grouping with category totals
-  - Planning compliance rate and accuracy metrics
-  - Overtime rate tracking and authorization verification
-  - Export-ready format for payroll integration
-✓ Role-based permissions ensuring data security and proper access control
-✓ Interactive test page created for all time entry operations
-
-### 2025-08-03: Frontend-Backend Authentication Integration
-✓ Completely replaced mock authentication system with real API calls:
-  - Created comprehensive api.ts utility with Axios HTTP client
-  - Implemented JWT token management with automatic refresh
-  - Added request/response interceptors for automatic token handling
-  - Token storage in localStorage with secure error handling
-  - 401 automatic redirect and token refresh on expiry
-✓ Updated AuthContext.tsx for real API integration:
-  - Removed role selection (API determines user role automatically)
-  - Added loading states for authentication initialization
-  - Implemented automatic user data persistence and refresh
-  - Added token expiration event handling
-✓ Updated Login.tsx component:
-  - Removed role selection UI (API determines role)
-  - Added proper error handling with user-friendly messages
-  - Updated demo login buttons with correct credentials
-  - Added loading states during authentication
-✓ Created comprehensive useApi() hooks:
-  - Type-safe API calls with generic support
-  - Automatic retry mechanism for network errors
-  - Loading state management and error handling
-  - Specialized hooks for employees, time entries, planning operations
-✓ Updated App.tsx routing with proper authentication:
-  - Added loading screens during auth initialization
-  - Protected routes with role-based access control
-  - Automatic navigation based on user role from API
-✓ Authentication system now fully operational with real JWT tokens
-
-### 2025-08-03: React Query Server State Management Integration
-✓ Implemented comprehensive React Query (TanStack Query) integration:
-  - Created optimized QueryClient with 5-minute default cache and 3-retry logic
-  - Added React Query DevTools for development debugging
-  - Configured automatic refetch on window focus and network reconnection
-  - Set up intelligent cache management with stale-while-revalidate strategy
-✓ Built comprehensive API hooks library (lib/api-hooks.ts):
-  - useEmployees() with pagination, filtering, and search capabilities
-  - useEmployee() for individual employee details with 5-minute cache
-  - useEmployeeStats() with real-time 30-second cache for statistics
-  - usePlanning() hooks for planning management with 1-minute cache
-  - useTimeEntries() with 30-second cache for real-time time tracking
-  - useTasks() and useProjects() for task and project management
-✓ Implemented optimistic updates for critical operations:
-  - Time entry creation with immediate UI feedback
-  - Task status changes with instant visual updates
-  - Planning validation with optimistic status changes
-  - Employee updates with rollback on error
-✓ Advanced caching and performance features:
-  - Query key factories for consistent cache management
-  - Prefetch hooks for hover-based data loading
-  - Automatic cache invalidation after mutations
-  - Background refetch for real-time data without loading states
-✓ Error handling and user experience:
-  - Comprehensive error boundaries with user-friendly messages
-  - Loading skeletons and pending states for all queries
-  - Toast notifications for successful operations and errors
-  - Automatic retry with exponential backoff for network errors
-✓ Demo components created to showcase React Query capabilities:
-  - SimpleQueryExample for basic cache and mutations demonstration
-  - ReactQueryDemo showing advanced features and performance indicators
-  - Real-time time tracking with auto-refresh every 30 seconds
-
-### 2025-08-03: ClockPilot Marketing Landing Page
-✓ Completely rebuilt landing page with professional marketing design
-✓ Created 8 new landing components in `client/src/components/landing/`:
-  - HeroSection: Main hero with French compliance badge and CTAs
-  - ProblemSection: Pain points with visual icons
-  - FeaturesSection: 3 key features with alternating layouts
-  - SocialProofSection: Customer testimonials and stats
-  - PricingSection: Single plan with interactive ROI calculator
-  - SectorsSection: 4 target industry sectors
-  - FAQSection: Expandable FAQ accordion
-  - FinalCTASection: Final CTA with guarantees
-✓ Added Header component with fixed navigation and mobile menu
-✓ Added Footer component with comprehensive links and contact info
-✓ Created custom landing styles in `client/src/styles/landing.css`
-✓ Added required UI components: Slider, Badge
-✓ Implemented smooth scrolling navigation and animations
-✓ Fully responsive design for mobile, tablet, and desktop
-✓ All CTAs ready for future auth integration
-
-### 2025-08-03: Database Integration  
-✓ Created PostgreSQL database using Neon
-✓ Updated storage layer from MemStorage to DatabaseStorage
-✓ Pushed schema to database using `npm run db:push`
-✓ Implemented database connection with proper error handling
+This is a full-stack JavaScript application designed to manage employee data, planning, time entries, and tasks for businesses, ensuring compliance with labor laws. The system aims to streamline HR and project management workflows, offering features like comprehensive authentication, detailed employee management, advanced planning with legal constraints (e.g., French labor laws), robust time tracking with anomaly detection, and a user-friendly interface. It targets a broad market, providing a scalable and efficient solution for workforce management.
 
 ## User Preferences
 - None specified yet
 
-## Development Setup
-- Run `npm run dev` to start both frontend and backend servers
-- Database migrations handled via `npm run db:push`
-- Environment variables managed automatically by Replit
+## System Architecture
+
+### Database
+- **Technology**: PostgreSQL with Neon for serverless capabilities
+- **ORM**: Drizzle ORM for type-safe interactions
+- **Schema**: Centralized in `shared/schema.ts`, defining entities like users, employees, departments, projects, planning entries, time entries, tasks, settings, and validations with comprehensive relations and performance-optimized indexes.
+
+### Backend
+- **Framework**: Express.js
+- **Data Access**: `DatabaseStorage` class implementing an `IStorage` interface for CRUD operations.
+- **API**: Defined in `server/routes.ts`, including comprehensive APIs for authentication (JWT-based with token refresh and blacklist), employee management (CRUD, pagination, filtering, stats), planning (generation, validation workflow, conflict detection, legal constraints), and time entries (tracking, overtime calculation, anomaly detection, bulk operations).
+- **Security**: JWT authentication with role-based access control and Zod validation for all API endpoints.
+
+### Frontend
+- **Framework**: React with Vite
+- **Routing**: Wouter for client-side navigation.
+- **Styling**: Tailwind CSS with shadcn/ui components for a modern UI/UX, including a professional marketing landing page with various dedicated components.
+- **State Management**: TanStack Query (React Query) for server state management, optimized with caching, automatic refetching, optimistic updates, query key factories, and performance debugging tools.
+- **Integration**: Comprehensive `api.ts` utility with Axios for type-safe API calls, JWT token management, and interceptors for automatic token handling and error management.
+- **UI/UX**: Features advanced filtering systems (search, multi-select, date ranges, boolean toggles) across list pages, responsive design, smooth scrolling, and animations.
+
+### Core System Features
+- **Comprehensive Database Schema**: Robust structure for various HR and project management entities.
+- **JWT Authentication System**: Secure user registration, login, logout, and token refresh with role-based access control.
+- **Employee Management API**: Full CRUD operations for employees, with advanced filtering, pagination, and statistics.
+- **Planning API**: Supports detailed planning, auto-generation, weekly validation, and conflict detection with business logic incorporating legal constraints (e.g., 10h/day, 48h/week, 11h rest).
+- **Time Entries API**: Real-time time tracking, overtime calculation, overlap validation, anomaly detection (e.g., missing breaks, unauthorized overtime), and planning vs. actual analysis.
+- **Advanced Filtering System**: Centralized `FilterBar` component and `useFilters` hook for consistent filtering, URL synchronization, and backend query parameter validation across all list views.
+- **Export Functionality**: Excel and PDF export options for filtered data.
+
+## External Dependencies
+- **PostgreSQL**: Primary database for data persistence.
+- **Neon**: Serverless Postgres platform.
+- **Express.js**: Backend web framework.
+- **React**: Frontend UI library.
+- **Vite**: Frontend build tool.
+- **Drizzle ORM**: Object-Relational Mapper for database interactions.
+- **Wouter**: React routing library.
+- **Tailwind CSS**: Utility-first CSS framework.
+- **shadcn/ui**: Component library built with Tailwind CSS.
+- **TanStack Query (React Query)**: Data fetching and state management library.
+- **Axios**: HTTP client for API requests.
+- **bcrypt**: For password hashing.
+- **Zod**: For schema validation.

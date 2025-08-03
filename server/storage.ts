@@ -28,7 +28,7 @@ import {
   type InsertNotification,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, sql, like, or } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, like, or, isNull, isNotNull } from "drizzle-orm";
 
 // ============================================================================
 // STORAGE INTERFACE - Define all CRUD operations needed by the application
@@ -267,6 +267,14 @@ export class DatabaseStorage implements IStorage {
       search?: string; 
       department?: number; 
       status?: string; 
+      contractType?: string;
+      managerId?: number;
+      hiredAfter?: string;
+      hiredBefore?: string;
+      minWeeklyHours?: number;
+      maxWeeklyHours?: number;
+      hasEmail?: boolean;
+      hasPhone?: boolean;
       sortBy?: string; 
       sortOrder?: string; 
     }
@@ -283,6 +291,46 @@ export class DatabaseStorage implements IStorage {
     
     if (filters?.department) {
       conditions.push(eq(employees.department_id, filters.department));
+    }
+
+    if (filters?.contractType) {
+      conditions.push(eq(employees.contract_type, filters.contractType));
+    }
+
+    if (filters?.managerId) {
+      conditions.push(eq(employees.manager_id, filters.managerId));
+    }
+
+    if (filters?.hiredAfter) {
+      conditions.push(gte(employees.hire_date, filters.hiredAfter));
+    }
+
+    if (filters?.hiredBefore) {
+      conditions.push(lte(employees.hire_date, filters.hiredBefore));
+    }
+
+    if (filters?.minWeeklyHours !== undefined) {
+      conditions.push(gte(employees.weekly_hours, filters.minWeeklyHours));
+    }
+
+    if (filters?.maxWeeklyHours !== undefined) {
+      conditions.push(lte(employees.weekly_hours, filters.maxWeeklyHours));
+    }
+
+    if (filters?.hasEmail !== undefined) {
+      if (filters.hasEmail) {
+        conditions.push(isNotNull(users.email));
+      } else {
+        conditions.push(isNull(users.email));
+      }
+    }
+
+    if (filters?.hasPhone !== undefined) {
+      if (filters.hasPhone) {
+        conditions.push(isNotNull(employees.phone));
+      } else {
+        conditions.push(isNull(employees.phone));
+      }
     }
     
     if (filters?.search) {
@@ -341,6 +389,12 @@ export class DatabaseStorage implements IStorage {
         break;
       case 'department':
         query = query.orderBy(sortDirection(departments.name));
+        break;
+      case 'contract_type':
+        query = query.orderBy(sortDirection(employees.contract_type));
+        break;
+      case 'weekly_hours':
+        query = query.orderBy(sortDirection(employees.weekly_hours));
         break;
       default:
         query = query.orderBy(sortDirection(employees.created_at));

@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test - Système de Filtres Avancés ClockPilot</title>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f8fafc;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .test-section {
+            background: white;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .test-header {
+            background: #3b82f6;
+            color: white;
+            padding: 15px 20px;
+            font-weight: 600;
+        }
+        
+        .test-content {
+            padding: 20px;
+        }
+        
+        .filter-demo {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .filter-group {
+            padding: 15px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+        }
+        
+        .filter-label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #374151;
+        }
+        
+        .filter-control {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: white;
+        }
+        
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .btn:hover {
+            background: #2563eb;
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        
+        .results-panel {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .result-item {
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .status-active { background: #dcfce7; color: #166534; }
+        .status-inactive { background: #fef2f2; color: #dc2626; }
+        .status-draft { background: #fef3c7; color: #d97706; }
+        .status-validated { background: #dcfce7; color: #166534; }
+        
+        .loading {
+            text-align: center;
+            color: #6b7280;
+            padding: 20px;
+        }
+        
+        .error {
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .success {
+            background: #dcfce7;
+            color: #166534;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+        
+        .stat-label {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Test - Système de Filtres Avancés ClockPilot</h1>
+            <p>Interface de test pour valider les fonctionnalités de filtrage avancé des employés, planning et tâches</p>
+        </div>
+
+        <!-- Stats générales -->
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="totalEmployees">-</div>
+                <div class="stat-label">Employés Total</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalPlanning">-</div>
+                <div class="stat-label">Entrées Planning</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalTasks">-</div>
+                <div class="stat-label">Tâches Total</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="filtersUsed">0</div>
+                <div class="stat-label">Filtres Appliqués</div>
+            </div>
+        </div>
+
+        <!-- Test des filtres employés -->
+        <div class="test-section">
+            <div class="test-header">
+                👥 Filtres Avancés - Employés
+            </div>
+            <div class="test-content">
+                <div class="filter-demo">
+                    <div class="filter-group">
+                        <div class="filter-label">Recherche Textuelle</div>
+                        <input type="text" class="filter-control" id="employeeSearch" placeholder="Nom, email, numéro...">
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Département</div>
+                        <select class="filter-control" id="employeeDepartment">
+                            <option value="">Tous les départements</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Statut</div>
+                        <select class="filter-control" id="employeeStatus">
+                            <option value="">Tous les statuts</option>
+                            <option value="active">Actif</option>
+                            <option value="inactive">Inactif</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Type de Contrat</div>
+                        <select class="filter-control" id="employeeContract">
+                            <option value="">Tous les contrats</option>
+                            <option value="CDI">CDI</option>
+                            <option value="CDD">CDD</option>
+                            <option value="STAGE">Stage</option>
+                            <option value="FREELANCE">Freelance</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Embauché Après</div>
+                        <input type="date" class="filter-control" id="employeeHiredAfter">
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Heures/Semaine (Min)</div>
+                        <select class="filter-control" id="employeeMinHours">
+                            <option value="">Pas de minimum</option>
+                            <option value="10">10h</option>
+                            <option value="20">20h</option>
+                            <option value="35">35h</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <button class="btn" onclick="testEmployeeFilters()">🔍 Appliquer Filtres</button>
+                    <button class="btn btn-secondary" onclick="clearEmployeeFilters()">🗑️ Réinitialiser</button>
+                    <button class="btn btn-secondary" onclick="exportEmployees('excel')">📊 Export Excel</button>
+                </div>
+                
+                <div class="results-panel" id="employeeResults">
+                    <div class="loading">Cliquez sur "Appliquer Filtres" pour voir les résultats</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test des filtres planning -->
+        <div class="test-section">
+            <div class="test-header">
+                📅 Filtres Avancés - Planning
+            </div>
+            <div class="test-content">
+                <div class="filter-demo">
+                    <div class="filter-group">
+                        <div class="filter-label">Date Début</div>
+                        <input type="date" class="filter-control" id="planningStartDate">
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Date Fin</div>
+                        <input type="date" class="filter-control" id="planningEndDate">
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Employé</div>
+                        <select class="filter-control" id="planningEmployee">
+                            <option value="">Tous les employés</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Statut</div>
+                        <select class="filter-control" id="planningStatus">
+                            <option value="">Tous les statuts</option>
+                            <option value="draft">Brouillon</option>
+                            <option value="submitted">Soumis</option>
+                            <option value="validated">Validé</option>
+                            <option value="rejected">Rejeté</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Type</div>
+                        <select class="filter-control" id="planningType">
+                            <option value="">Tous les types</option>
+                            <option value="work">Travail</option>
+                            <option value="vacation">Congés</option>
+                            <option value="sick">Maladie</option>
+                            <option value="training">Formation</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Conflits</div>
+                        <select class="filter-control" id="planningConflicts">
+                            <option value="">Avec ou sans conflits</option>
+                            <option value="true">Avec conflits</option>
+                            <option value="false">Sans conflits</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <button class="btn" onclick="testPlanningFilters()">🔍 Appliquer Filtres</button>
+                    <button class="btn btn-secondary" onclick="clearPlanningFilters()">🗑️ Réinitialiser</button>
+                    <button class="btn btn-secondary" onclick="exportPlanning('excel')">📊 Export Excel</button>
+                </div>
+                
+                <div class="results-panel" id="planningResults">
+                    <div class="loading">Cliquez sur "Appliquer Filtres" pour voir les résultats</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test des filtres tâches -->
+        <div class="test-section">
+            <div class="test-header">
+                ✅ Filtres Avancés - Tâches
+            </div>
+            <div class="test-content">
+                <div class="filter-demo">
+                    <div class="filter-group">
+                        <div class="filter-label">Recherche</div>
+                        <input type="text" class="filter-control" id="taskSearch" placeholder="Titre, description...">
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Statut</div>
+                        <select class="filter-control" id="taskStatus">
+                            <option value="">Tous les statuts</option>
+                            <option value="todo">À faire</option>
+                            <option value="in_progress">En cours</option>
+                            <option value="completed">Terminé</option>
+                            <option value="cancelled">Annulé</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Priorité</div>
+                        <select class="filter-control" id="taskPriority">
+                            <option value="">Toutes les priorités</option>
+                            <option value="low">Faible</option>
+                            <option value="medium">Moyenne</option>
+                            <option value="high">Élevée</option>
+                            <option value="urgent">Urgente</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Catégorie</div>
+                        <select class="filter-control" id="taskCategory">
+                            <option value="">Toutes les catégories</option>
+                            <option value="development">Développement</option>
+                            <option value="bug">Bug</option>
+                            <option value="feature">Fonctionnalité</option>
+                            <option value="maintenance">Maintenance</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">Échéance Avant</div>
+                        <input type="date" class="filter-control" id="taskDueBefore">
+                    </div>
+                    <div class="filter-group">
+                        <div class="filter-label">En Retard</div>
+                        <select class="filter-control" id="taskOverdue">
+                            <option value="">Toutes les tâches</option>
+                            <option value="true">En retard uniquement</option>
+                            <option value="false">À jour uniquement</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <button class="btn" onclick="testTaskFilters()">🔍 Appliquer Filtres</button>
+                    <button class="btn btn-secondary" onclick="clearTaskFilters()">🗑️ Réinitialiser</button>
+                    <button class="btn btn-secondary" onclick="exportTasks('excel')">📊 Export Excel</button>
+                </div>
+                
+                <div class="results-panel" id="taskResults">
+                    <div class="loading">Cliquez sur "Appliquer Filtres" pour voir les résultats</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration API
+        const API_BASE = window.location.origin;
+        let authToken = null;
+
+        // Fonctions utilitaires pour l'API
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const response = await axios({
+                    url: `${API_BASE}${endpoint}`,
+                    method: options.method || 'GET',
+                    headers: {
+                        'Authorization': authToken ? `Bearer ${authToken}` : '',
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    data: options.data,
+                    params: options.params
+                });
+                return response.data;
+            } catch (error) {
+                console.error('API Call Error:', error);
+                throw error;
+            }
+        }
+
+        // Initialisation de la page
+        async function initPage() {
+            try {
+                // Essayer de récupérer un token de test ou utiliser demo
+                const testCredentials = {
+                    email: 'admin@clockpilot.com',
+                    password: 'admin123'
+                };
+
+                const loginResponse = await axios.post(`${API_BASE}/api/auth/login`, testCredentials);
+                authToken = loginResponse.data.token;
+                
+                await loadStats();
+                await loadFilterOptions();
+                
+            } catch (error) {
+                console.error('Erreur d\'initialisation:', error);
+                showError('Impossible de se connecter à l\'API. Vérifiez que ClockPilot est en cours d\'exécution.');
+            }
+        }
+
+        // Charger les statistiques
+        async function loadStats() {
+            try {
+                const [employees, planning, tasks] = await Promise.all([
+                    apiCall('/api/employees?limit=1'),
+                    apiCall('/api/planning?limit=1'), 
+                    apiCall('/api/tasks?limit=1')
+                ]);
+
+                document.getElementById('totalEmployees').textContent = employees.pagination?.total || 0;
+                document.getElementById('totalPlanning').textContent = planning.pagination?.total || 0;
+                document.getElementById('totalTasks').textContent = tasks.pagination?.total || 0;
+            } catch (error) {
+                console.error('Erreur de chargement des stats:', error);
+            }
+        }
+
+        // Charger les options de filtres
+        async function loadFilterOptions() {
+            try {
+                // Charger les départements
+                const departments = await apiCall('/api/departments');
+                const deptSelect = document.getElementById('employeeDepartment');
+                const planningDeptSelect = document.getElementById('planningEmployee');
+                
+                if (departments.data) {
+                    departments.data.forEach(dept => {
+                        deptSelect.innerHTML += `<option value="${dept.id}">${dept.name}</option>`;
+                    });
+                }
+
+                // Charger les employés pour le planning
+                const employees = await apiCall('/api/employees?limit=100');
+                if (employees.data) {
+                    employees.data.forEach(emp => {
+                        planningDeptSelect.innerHTML += `<option value="${emp.id}">${emp.firstName} ${emp.lastName}</option>`;
+                    });
+                }
+
+            } catch (error) {
+                console.error('Erreur de chargement des options:', error);
+            }
+        }
+
+        // Test des filtres employés
+        async function testEmployeeFilters() {
+            const resultsDiv = document.getElementById('employeeResults');
+            resultsDiv.innerHTML = '<div class="loading">Chargement des employés...</div>';
+
+            try {
+                const filters = {
+                    search: document.getElementById('employeeSearch').value,
+                    department: document.getElementById('employeeDepartment').value,
+                    status: document.getElementById('employeeStatus').value,
+                    contractType: document.getElementById('employeeContract').value,
+                    hiredAfter: document.getElementById('employeeHiredAfter').value,
+                    minWeeklyHours: document.getElementById('employeeMinHours').value
+                };
+
+                // Supprimer les filtres vides
+                Object.keys(filters).forEach(key => {
+                    if (!filters[key]) delete filters[key];
+                });
+
+                const response = await apiCall('/api/employees', { params: filters });
+                displayEmployeeResults(response, resultsDiv);
+                updateFiltersCount(Object.keys(filters).length);
+
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Erreur: ${error.message}</div>`;
+                console.error('Erreur de filtrage employés:', error);
+            }
+        }
+
+        // Test des filtres planning
+        async function testPlanningFilters() {
+            const resultsDiv = document.getElementById('planningResults');
+            resultsDiv.innerHTML = '<div class="loading">Chargement du planning...</div>';
+
+            try {
+                const filters = {
+                    start_date: document.getElementById('planningStartDate').value,
+                    end_date: document.getElementById('planningEndDate').value,
+                    employee_id: document.getElementById('planningEmployee').value,
+                    status: document.getElementById('planningStatus').value,
+                    type: document.getElementById('planningType').value,
+                    hasConflicts: document.getElementById('planningConflicts').value
+                };
+
+                Object.keys(filters).forEach(key => {
+                    if (!filters[key]) delete filters[key];
+                });
+
+                const response = await apiCall('/api/planning', { params: filters });
+                displayPlanningResults(response, resultsDiv);
+                updateFiltersCount(Object.keys(filters).length);
+
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Erreur: ${error.message}</div>`;
+                console.error('Erreur de filtrage planning:', error);
+            }
+        }
+
+        // Test des filtres tâches
+        async function testTaskFilters() {
+            const resultsDiv = document.getElementById('taskResults');
+            resultsDiv.innerHTML = '<div class="loading">Chargement des tâches...</div>';
+
+            try {
+                const filters = {
+                    search: document.getElementById('taskSearch').value,
+                    status: document.getElementById('taskStatus').value,
+                    priority: document.getElementById('taskPriority').value,
+                    category: document.getElementById('taskCategory').value,
+                    dueBefore: document.getElementById('taskDueBefore').value,
+                    overdue: document.getElementById('taskOverdue').value
+                };
+
+                Object.keys(filters).forEach(key => {
+                    if (!filters[key]) delete filters[key];
+                });
+
+                const response = await apiCall('/api/tasks', { params: filters });
+                displayTaskResults(response, resultsDiv);
+                updateFiltersCount(Object.keys(filters).length);
+
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Erreur: ${error.message}</div>`;
+                console.error('Erreur de filtrage tâches:', error);
+            }
+        }
+
+        // Affichage des résultats employés
+        function displayEmployeeResults(response, container) {
+            const employees = response.data || [];
+            const pagination = response.pagination || {};
+
+            let html = `<div class="success">✅ ${employees.length} employé(s) trouvé(s) sur ${pagination.total || 0} total</div>`;
+            
+            employees.forEach(emp => {
+                html += `
+                    <div class="result-item">
+                        <strong>${emp.firstName} ${emp.lastName}</strong>
+                        <span class="status-badge status-${emp.isActive ? 'active' : 'inactive'}">${emp.isActive ? 'Actif' : 'Inactif'}</span>
+                        <br>
+                        <small>📧 ${emp.userEmail} | 🏢 ${emp.departmentName || 'N/A'} | 📝 ${emp.contractType}</small>
+                        <br>
+                        <small>📅 Embauché le ${new Date(emp.hireDate).toLocaleDateString('fr-FR')} | ⏰ ${emp.weeklyHours || 0}h/sem</small>
+                    </div>
+                `;
+            });
+
+            if (employees.length === 0) {
+                html += '<div class="loading">Aucun employé ne correspond aux filtres sélectionnés</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        // Affichage des résultats planning
+        function displayPlanningResults(response, container) {
+            const entries = response.data || [];
+            const pagination = response.pagination || {};
+
+            let html = `<div class="success">✅ ${entries.length} entrée(s) trouvée(s) sur ${pagination.total || 0} total</div>`;
+            
+            entries.forEach(entry => {
+                html += `
+                    <div class="result-item">
+                        <strong>${entry.employee?.firstName || 'N/A'} ${entry.employee?.lastName || ''}</strong>
+                        <span class="status-badge status-${entry.status}">${entry.status}</span>
+                        <br>
+                        <small>📅 ${new Date(entry.date).toLocaleDateString('fr-FR')} | ⏰ ${entry.startTime} - ${entry.endTime}</small>
+                        <br>
+                        <small>🏷️ ${entry.type} | ${entry.hasConflicts ? '⚠️ Conflits' : '✅ OK'}</small>
+                    </div>
+                `;
+            });
+
+            if (entries.length === 0) {
+                html += '<div class="loading">Aucune entrée de planning ne correspond aux filtres sélectionnés</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        // Affichage des résultats tâches
+        function displayTaskResults(response, container) {
+            const tasks = response.data || [];
+            const pagination = response.pagination || {};
+
+            let html = `<div class="success">✅ ${tasks.length} tâche(s) trouvée(s) sur ${pagination.total || 0} total</div>`;
+            
+            tasks.forEach(task => {
+                html += `
+                    <div class="result-item">
+                        <strong>${task.title}</strong>
+                        <span class="status-badge status-${task.status}">${task.status}</span>
+                        <br>
+                        <small>👤 ${task.assignee?.firstName || 'N/A'} ${task.assignee?.lastName || ''} | 🚩 ${task.priority}</small>
+                        <br>
+                        <small>📅 ${task.dueDate ? new Date(task.dueDate).toLocaleDateString('fr-FR') : 'Pas d\'échéance'} | ${task.isOverdue ? '⚠️ En retard' : '⏰ À jour'}</small>
+                    </div>
+                `;
+            });
+
+            if (tasks.length === 0) {
+                html += '<div class="loading">Aucune tâche ne correspond aux filtres sélectionnés</div>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        // Fonction de réinitialisation
+        function clearEmployeeFilters() {
+            document.getElementById('employeeSearch').value = '';
+            document.getElementById('employeeDepartment').selectedIndex = 0;
+            document.getElementById('employeeStatus').selectedIndex = 0;
+            document.getElementById('employeeContract').selectedIndex = 0;
+            document.getElementById('employeeHiredAfter').value = '';
+            document.getElementById('employeeMinHours').selectedIndex = 0;
+            document.getElementById('employeeResults').innerHTML = '<div class="loading">Cliquez sur "Appliquer Filtres" pour voir les résultats</div>';
+            updateFiltersCount(0);
+        }
+
+        function clearPlanningFilters() {
+            document.getElementById('planningStartDate').value = '';
+            document.getElementById('planningEndDate').value = '';
+            document.getElementById('planningEmployee').selectedIndex = 0;
+            document.getElementById('planningStatus').selectedIndex = 0;
+            document.getElementById('planningType').selectedIndex = 0;
+            document.getElementById('planningConflicts').selectedIndex = 0;
+            document.getElementById('planningResults').innerHTML = '<div class="loading">Cliquez sur "Appliquer Filtres" pour voir les résultats</div>';
+            updateFiltersCount(0);
+        }
+
+        function clearTaskFilters() {
+            document.getElementById('taskSearch').value = '';
+            document.getElementById('taskStatus').selectedIndex = 0;
+            document.getElementById('taskPriority').selectedIndex = 0;
+            document.getElementById('taskCategory').selectedIndex = 0;
+            document.getElementById('taskDueBefore').value = '';
+            document.getElementById('taskOverdue').selectedIndex = 0;
+            document.getElementById('taskResults').innerHTML = '<div class="loading">Cliquez sur "Appliquer Filtres" pour voir les résultats</div>';
+            updateFiltersCount(0);
+        }
+
+        // Fonctions d'export
+        async function exportEmployees(format) {
+            try {
+                const filters = {};
+                const response = await fetch(`${API_BASE}/api/employees/export?format=${format}`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `employes.${format}`;
+                    a.click();
+                    showSuccess('Export terminé !');
+                } else {
+                    showError('Erreur d\'export');
+                }
+            } catch (error) {
+                showError('Erreur d\'export: ' + error.message);
+            }
+        }
+
+        async function exportPlanning(format) {
+            showSuccess('Fonction d\'export du planning pas encore implémentée');
+        }
+
+        async function exportTasks(format) {
+            showSuccess('Fonction d\'export des tâches pas encore implémentée');
+        }
+
+        // Fonctions utilitaires
+        function updateFiltersCount(count) {
+            document.getElementById('filtersUsed').textContent = count;
+        }
+
+        function showError(message) {
+            console.error(message);
+        }
+
+        function showSuccess(message) {
+            console.log(message);
+        }
+
+        // Initialisation au chargement de la page
+        document.addEventListener('DOMContentLoaded', initPage);
+    </script>
+</body>
+</html>
