@@ -113,12 +113,19 @@ export const TimeEntry: React.FC = () => {
   useEffect(() => {
     const slots = generateTimeSlots();
     setTimeSlots(slots);
+    setSelectedSlots([]); // Réinitialiser la sélection
     
     // Charger les données sauvegardées
     const savedData = localStorage.getItem(`timeEntry-${selectedDate.toISOString().split('T')[0]}`);
     if (savedData) {
       const parsed: DayPlanning = JSON.parse(savedData);
-      setTimeSlots(parsed.creneaux);
+      // Vérifier si les créneaux sauvegardés correspondent à l'intervalle actuel
+      const savedInterval = parsed.creneaux.length > 0 ? 
+        (parseInt(parsed.creneaux[1]?.start.split(':')[1]) - parseInt(parsed.creneaux[0]?.start.split(':')[1])) || 30 : 30;
+      
+      if (savedInterval === interval) {
+        setTimeSlots(parsed.creneaux);
+      }
     }
   }, [selectedDate, interval, startHour, endHour, generateTimeSlots]);
 
