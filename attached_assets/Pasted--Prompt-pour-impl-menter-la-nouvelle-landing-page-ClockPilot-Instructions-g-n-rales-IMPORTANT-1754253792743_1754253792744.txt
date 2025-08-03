@@ -1,0 +1,191 @@
+# Prompt pour implémenter la nouvelle landing page ClockPilot
+
+## Instructions générales
+**IMPORTANT** : Modifier UNIQUEMENT les fichiers de la landing page sans impacter le reste de l'application. Ne pas toucher aux routes d'authentification, aux composants internes, ni à la logique métier existante.
+
+## Objectif
+Implémenter une landing page marketing professionnelle pour ClockPilot basée sur le design fourni, en remplaçant la page d'accueil actuelle par cette nouvelle version optimisée pour la conversion.
+
+## Fichiers à modifier/créer
+
+### 1. Page principale (remplacer la landing existante)
+- **Fichier** : `src/app/page.tsx` ou équivalent selon l'architecture
+- **Action** : Remplacer complètement le contenu par la nouvelle landing page
+
+### 2. Composants de la landing page à créer
+Créer ces nouveaux composants dans un dossier séparé (ex: `src/components/landing/`) :
+
+#### A. `HeroSection.tsx`
+```typescript
+- Hero avec title accrocheur "Enfin un planning qui marche : fini les tableaux Excel et les emails sans fin"
+- Badge "🇫🇷 Conforme au droit du travail français"
+- Subtitle expliquant la proposition de valeur
+- 2 CTA : "Essai gratuit 14 jours" et "Voir la démo 2min"
+- Image hero (mockup interface planning)
+```
+
+#### B. `ProblemSection.tsx`
+```typescript
+- Titre "Stop aux galères de planning"
+- 3 colonnes de problèmes avec icônes :
+  * 😤 Plannings chaotiques (icône table-2)
+  * ⏰ Validation manuelle fastidieuse (icône mouse-pointer-square)
+  * 💸 Erreurs de paie fréquentes (icône siren)
+```
+
+#### C. `FeaturesSection.tsx`
+```typescript
+- Titre "Tout ce qu'il faut, rien de trop"
+- 3 features principales en alternance image/texte :
+  1. Planning Visuel (badge "Intuitif")
+  2. Saisie Simplifiée (badge "Rapide")  
+  3. Validation Intelligente (badge "Fiable")
+- Chaque feature avec liste de bénéfices + check icons
+```
+
+#### D. `SocialProofSection.tsx`
+```typescript
+- Titre "Adopté par plus de 200 entreprises"
+- 3 témoignages avec photos, noms, entreprises
+- 5 étoiles pour chaque témoignage
+- Témoignages authentiques sur les gains de temps
+```
+
+#### E. `PricingSection.tsx`
+```typescript
+- Fond sombre (bg-gray-900)
+- Plan unique à 19€ HT/employé/mois
+- Liste complète des fonctionnalités incluses
+- Calculateur ROI interactif avec slider
+- Formule : coût = nb_employés * 19€, économies = nb_employés * 60€
+```
+
+#### F. `SectorsSection.tsx`
+```typescript
+- 4 secteurs cibles en grid :
+  * BTP & Construction (icône hard-hat)
+  * Services & Consultance (icône briefcase)
+  * Commerce & Retail (icône store)
+  * PME Industrielles (icône factory)
+```
+
+#### G. `FAQSection.tsx`
+```typescript
+- Accordéon avec 5 FAQ prédéfinies
+- Animation smooth d'ouverture/fermeture
+- Icône plus qui devient X quand ouvert
+- Questions sur conformité légale, exports, sécurité, support
+```
+
+#### H. `FinalCTASection.tsx`
+```typescript
+- Fond bleu (bg-blue-600)
+- CTA final "Prêt à simplifier vos plannings ?"
+- 4 garanties en grid : essai gratuit, setup 48h, support, résiliation libre
+```
+
+### 3. Styles et animations
+#### A. Créer `src/styles/landing.css`
+```css
+- Styles pour FAQ accordéon
+- Styles pour slider ROI
+- Transitions et hover effects
+- Responsive design
+```
+
+#### B. Animations scroll
+```typescript
+- Utiliser Framer Motion ou alternative Next.js
+- Animation "fade in from bottom" sur scroll
+- Classe `.animate-on-scroll` sur tous les éléments
+```
+
+### 4. Header/Navigation
+#### Modifier le header existant pour la landing :
+```typescript
+- Logo ClockPilot avec icône clock
+- Menu : Fonctionnalités, Tarifs, FAQ
+- CTA "Essai gratuit" 
+- Menu mobile hamburger
+- Background blur au scroll
+```
+
+### 5. Footer
+#### Créer/modifier footer marketing :
+```typescript
+- 4 colonnes : Marque, Liens utiles, Légal, Contact
+- Informations de contact français
+- Copyright 2025
+```
+
+## Spécifications techniques
+
+### Design system
+- **Couleurs** : 
+  - Primaire : Blue-600 (#2563EB)
+  - Backgrounds : Gray-50, White, Gray-900
+  - Texte : Gray-900, Gray-600, Gray-300
+- **Typography** : Inter font, tailles responsive
+- **Espacement** : Utiliser Tailwind spacing scale
+- **Breakpoints** : Mobile-first responsive design
+
+### Interactions obligatoires
+1. **Calculateur ROI** : Slider fonctionnel avec calculs en temps réel
+2. **FAQ Accordéon** : Animation smooth, fermeture automatique des autres
+3. **Menu mobile** : Toggle hamburger avec animation
+4. **Header scroll** : Effet blur/shadow au scroll
+5. **Animations** : Fade in des sections au scroll
+
+### Images (utiliser des placeholders)
+- Hero mockup interface
+- 3 images pour les features
+- 3 photos de profil pour témoignages (diverse, professionnelle)
+
+### CTA et liens
+- Tous les CTA pointent vers `#` pour l'instant
+- Prévoir l'intégration future avec l'auth existante
+- Liens de navigation avec smooth scroll
+
+## Intégration avec l'existant
+
+### Points d'attention
+1. **Ne pas casser l'auth** : Garder les routes `/login`, `/register`, `/dashboard` intactes
+2. **Préserver les composants** : Ne pas modifier les composants UI existants utilisés dans l'app
+3. **Styles isolés** : S'assurer que les styles landing n'impactent pas l'interface applicative
+4. **Layout conditionnel** : La landing peut avoir son propre layout différent de l'app
+
+### Structure recommandée
+```
+src/
+├── app/
+│   ├── page.tsx (NOUVELLE landing page)
+│   ├── login/ (CONSERVER existant)
+│   ├── register/ (CONSERVER existant)
+│   └── dashboard/ (CONSERVER existant)
+├── components/
+│   ├── landing/ (NOUVEAU dossier)
+│   │   ├── HeroSection.tsx
+│   │   ├── FeaturesSection.tsx
+│   │   └── ... (autres composants landing)
+│   └── ui/ (CONSERVER composants existants)
+└── styles/
+    └── landing.css (NOUVEAU)
+```
+
+## Checklist de validation
+- [ ] Landing page s'affiche correctement sur `/`
+- [ ] Toutes les animations fonctionnent
+- [ ] Calculateur ROI calcule correctement
+- [ ] FAQ s'ouvre/ferme proprement
+- [ ] Menu mobile fonctionne
+- [ ] Design responsive sur mobile/tablet/desktop
+- [ ] Les routes auth (`/login`, `/dashboard`) fonctionnent toujours
+- [ ] Aucun style de la landing n'affecte l'interface app
+- [ ] Performance : pas de ralentissement notable
+
+## Résultat attendu
+Une landing page marketing professionnelle et convertissante qui :
+- Présente clairement la proposition de valeur ClockPilot
+- Guide l'utilisateur vers l'essai gratuit
+- Inspire confiance avec social proof et transparence tarifaire
+- Reste techniquement isolée du reste de l'application
