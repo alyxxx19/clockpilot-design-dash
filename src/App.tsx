@@ -20,6 +20,7 @@ import { TimeEntry } from "./pages/employee/TimeEntry";
 import { Tasks } from "./pages/employee/Tasks";
 import { Reports } from "./pages/employee/Reports";
 import { Settings } from "./pages/employee/Settings";
+import { ScheduleComparison } from "./pages/employee/ScheduleComparison";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -100,6 +101,11 @@ const AppRoutes = () => {
       <Route path="/employee/time-entry" element={
         <ProtectedRoute allowedRole="employee">
           <TimeEntry />
+        </ProtectedRoute>
+      } />
+      <Route path="/employee/schedule-comparison" element={
+        <ProtectedRoute allowedRole="employee">
+          <ScheduleComparison />
         </ProtectedRoute>
       } />
       <Route path="/employee/tasks" element={
