@@ -17,7 +17,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { email, password, role } = req.body;
       
       const user = await storage.getUserByEmail(email);
-      if (!user || user.role !== role) {
+      if (!user || user.role !== role || user.password !== password) {
         return res.status(401).json({ error: "Identifiants invalides" });
       }
 
@@ -424,6 +424,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Données de démonstration initialisées" });
     } catch (error) {
       res.status(500).json({ error: "Erreur lors de l'initialisation" });
+    }
+  });
+
+  // Debug endpoint to check users
+  app.get("/api/debug/users", async (req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Erreur serveur" });
     }
   });
 

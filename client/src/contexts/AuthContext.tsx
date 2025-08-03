@@ -49,6 +49,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string, role: UserRole): Promise<boolean> => {
     try {
+      // Demo accounts for immediate testing
+      if (email === 'demo-admin@clockpilot.com' && password === 'demo' && role === 'admin') {
+        setUser({
+          id: '1',
+          email: 'demo-admin@clockpilot.com',
+          role: 'admin',
+          name: 'Admin Démo'
+        });
+        return true;
+      }
+      
+      if (email === 'demo-employee@clockpilot.com' && password === 'demo' && role === 'employee') {
+        setUser({
+          id: '2',
+          email: 'demo-employee@clockpilot.com',
+          role: 'employee',
+          name: 'Employé Démo'
+        });
+        
+        setEmployee({
+          id: 1,
+          userId: 2,
+          employeeNumber: 'EMP001',
+          department: 'Développement',
+          position: 'Développeur Full-Stack',
+          hourlyRate: '25.00',
+          weeklyHours: 35,
+          isActive: true
+        });
+        
+        return true;
+      }
+
+      // Try backend authentication for other accounts
       const response = await apiRequest('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password, role }),
