@@ -5,6 +5,15 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { 
+  avatarUpload, 
+  logoUpload, 
+  UploadService, 
+  handleMulterError 
+} from "./uploadMiddleware";
+import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import path from "path";
+import fs from "fs/promises";
+import { 
   registerSchema, 
   loginSchema, 
   refreshTokenSchema,
@@ -2043,6 +2052,221 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // ========================================
+  // FILE UPLOAD ROUTES
+  // ========================================
+  const uploadService = new UploadService();
+
+  // Serve uploaded files (fallback for local storage)
+  app.get('/uploads/:type/:filename', async (req: Request, res: Response) => {
+    try {
+      const { type, filename } = req.params;
+      
+      // Validate type
+      if (!['avatars', 'logos'].includes(type)) {
+        return res.status(404).json({ error: 'Type de fichier non trouvé' });
+      }
+
+      // Try object storage first
+      try {
+        const objectPath = `/objects/${type}/${filename}`;
+        const objectStorage = new ObjectStorageService();
+        const file = await objectStorage.getObjectEntityFile(objectPath);
+        await objectStorage.downloadObject(file, res);
+        return;
+      } catch (error) {
+        // Fallback to local storage (development)
+        const filePath = path.join(process.cwd(), 'uploads', type, filename);
+        try {
+          await fs.access(filePath);
+          res.sendFile(filePath);
+          return;
+        } catch {
+          return res.status(404).json({ error: 'Fichier non trouvé' });
+        }
+      }
+    } catch (error) {
+      console.error('File serve error:', error);
+      res.status(500).json({ error: 'Erreur lors de la récupération du fichier' });
+    }
+  });
+
+  // Upload avatar
+  app.post('/api/upload/avatar', 
+    authenticateToken as any,
+    avatarUpload.single('avatar'),
+    handleMulterError,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({
+            error: 'Aucun fichier fourni',
+            code: 'NO_FILE'
+          });
+        }
+
+        if (!req.user) {
+          return res.status(401).json({ error: 'Non authentifié' });
+        }
+
+        // Get current user's employee profile
+        const employee = await storage.getEmployeeByUserId(req.user.id);
+        if (!employee) {
+          return res.status(404).json({ error: 'Profil employé non trouvé' });
+        }
+
+        // Delete old avatar if exists
+        if (employee.avatarUrl) {
+          try {
+            await uploadService.deleteFile(employee.avatarUrl);
+          } catch (error) {
+            console.warn('Failed to delete old avatar:', error);
+          }
+        }
+
+        // Upload new avatar
+        const avatarUrl = await uploadService.uploadAvatar(req.file, req.user.id);
+
+        // Update employee profile
+        await storage.updateEmployee(employee.id, { avatarUrl });
+
+        res.json({
+          success: true,
+          avatarUrl,
+          message: 'Avatar mis à jour avec succès'
+        });
+
+      } catch (error) {
+        console.error('Avatar upload error:', error);
+        res.status(500).json({
+          error: 'Erreur lors de l\'upload de l\'avatar',
+          code: 'AVATAR_UPLOAD_ERROR'
+        });
+      }
+    }
+  );
+
+  // Upload logo (admin only)
+  app.post('/api/upload/logo',
+    authenticateToken as any,
+    authorizeRole(['admin']) as any,
+    logoUpload.single('logo'),
+    handleMulterError,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({
+            error: 'Aucun fichier fourni',
+            code: 'NO_FILE'
+          });
+        }
+
+        // Upload logo
+        const logoUrl = await uploadService.uploadLogo(req.file, 'company');
+
+        // TODO: Update company settings with logo URL
+        // This would require a company/settings table
+
+        res.json({
+          success: true,
+          logoUrl,
+          message: 'Logo mis à jour avec succès'
+        });
+
+      } catch (error) {
+        console.error('Logo upload error:', error);
+        res.status(500).json({
+          error: 'Erreur lors de l\'upload du logo',
+          code: 'LOGO_UPLOAD_ERROR'
+        });
+      }
+    }
+  );
+
+  // Delete file
+  app.delete('/api/upload/:type/:filename',
+    authenticateToken as any,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { type, filename } = req.params;
+        
+        // Validate type
+        if (!['avatars', 'logos'].includes(type)) {
+          return res.status(400).json({ error: 'Type de fichier invalide' });
+        }
+
+        // Check permissions
+        if (type === 'logos') {
+          // Only admin can delete logos
+          if (req.user?.role !== 'admin') {
+            return res.status(403).json({ error: 'Permission insuffisante' });
+          }
+        } else if (type === 'avatars') {
+          // Users can only delete their own avatars
+          const employee = await storage.getEmployeeByUserId(req.user!.id);
+          if (!employee || !employee.avatarUrl || !employee.avatarUrl.includes(filename)) {
+            return res.status(403).json({ error: 'Permission insuffisante' });
+          }
+        }
+
+        const objectPath = `/objects/${type}/${filename}`;
+        await uploadService.deleteFile(objectPath);
+
+        // Update database
+        if (type === 'avatars') {
+          const employee = await storage.getEmployeeByUserId(req.user!.id);
+          if (employee) {
+            await storage.updateEmployee(employee.id, { avatarUrl: null });
+          }
+        }
+
+        res.json({
+          success: true,
+          message: 'Fichier supprimé avec succès'
+        });
+
+      } catch (error) {
+        console.error('File deletion error:', error);
+        res.status(500).json({
+          error: 'Erreur lors de la suppression',
+          code: 'DELETE_ERROR'
+        });
+      }
+    }
+  );
+
+  // Get upload URL for direct upload (alternative method)
+  app.post('/api/upload/presigned',
+    authenticateToken as any,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { type } = req.body;
+        
+        if (!['avatar', 'logo'].includes(type)) {
+          return res.status(400).json({ error: 'Type invalide' });
+        }
+
+        if (type === 'logo' && req.user?.role !== 'admin') {
+          return res.status(403).json({ error: 'Permission insuffisante' });
+        }
+
+        const result = await uploadService.getUploadURL(type);
+        
+        res.json({
+          success: true,
+          ...result
+        });
+
+      } catch (error) {
+        console.error('Presigned URL error:', error);
+        res.status(500).json({
+          error: 'Erreur lors de la génération de l\'URL',
+          code: 'PRESIGNED_URL_ERROR'
+        });
+      }
+    }
+  );
 
   // ========================================
   // HEALTH CHECK

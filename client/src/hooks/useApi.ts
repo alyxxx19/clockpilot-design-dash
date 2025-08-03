@@ -202,7 +202,7 @@ export const useEmployees = (filters?: any) => {
   );
 };
 
-export const useEmployee = (id: number) => {
+export const useEmployee = (id: string | number) => {
   return useQuery(
     ['employee', id],
     () => apiClient.get(`/api/employees/${id}`),

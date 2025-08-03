@@ -24,6 +24,7 @@ import { Reports } from "./pages/employee/Reports";
 import { Settings } from "./pages/employee/Settings";
 import { ScheduleComparison } from "./pages/employee/ScheduleComparison";
 import NotFound from "./pages/NotFound";
+import { FileUploadDemo } from "@/components/upload/FileUploadDemo";
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRole }: { children: React.ReactNode; allowedRole?: 'admin' | 'employee' }) => {
@@ -140,6 +141,13 @@ const AppRoutes = () => {
       <Route path="/employee/settings" element={
         <ProtectedRoute allowedRole="employee">
           <Settings />
+        </ProtectedRoute>
+      } />
+      
+      {/* Upload Demo Route */}
+      <Route path="/upload-demo" element={
+        <ProtectedRoute>
+          <FileUploadDemo />
         </ProtectedRoute>
       } />
       
