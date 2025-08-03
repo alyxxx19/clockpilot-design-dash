@@ -68,8 +68,8 @@ const TIME_TYPES = [
 export const TimeEntry: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [interval, setInterval] = useState<15 | 30 | 60>(30);
-  const [startHour, setStartHour] = useState(6);
-  const [endHour, setEndHour] = useState(22);
+  const [startHour, setStartHour] = useState(0);
+  const [endHour, setEndHour] = useState(24);
   const [multipleMode, setMultipleMode] = useState(false);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
@@ -95,7 +95,7 @@ export const TimeEntry: React.FC = () => {
         const adjustedEndMinute = endMinute >= 60 ? endMinute - 60 : endMinute;
         const endTime = `${endHour.toString().padStart(2, '0')}:${adjustedEndMinute.toString().padStart(2, '0')}`;
         
-        if (endHour <= endHour) {
+        if (endHour < 24 || (endHour === 24 && adjustedEndMinute === 0)) {
           slots.push({
             id: `${startTime}-${endTime}`,
             start: startTime,
@@ -449,7 +449,7 @@ export const TimeEntry: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 18 }, (_, i) => i + 5).map(hour => (
+                    {Array.from({ length: 24 }, (_, i) => i).map(hour => (
                       <SelectItem key={hour} value={hour.toString()}>
                         {hour.toString().padStart(2, '0')}h
                       </SelectItem>
@@ -462,7 +462,7 @@ export const TimeEntry: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 18 }, (_, i) => i + 6).map(hour => (
+                    {Array.from({ length: 25 }, (_, i) => i).map(hour => (
                       <SelectItem key={hour} value={hour.toString()} disabled={hour <= startHour}>
                         {hour.toString().padStart(2, '0')}h
                       </SelectItem>
@@ -626,7 +626,7 @@ export const TimeEntry: React.FC = () => {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>
-              Créneaux horaires - {interval} minutes ({startHour.toString().padStart(2, '0')}h à {endHour.toString().padStart(2, '0')}h)
+              Créneaux horaires - {interval} minutes ({startHour.toString().padStart(2, '0')}h à {endHour === 24 ? '00h (+1j)' : endHour.toString().padStart(2, '0') + 'h'})
               {selectedSlots.length > 0 && (
                 <Badge variant="secondary" className="ml-2">
                   {selectedSlots.length} sélectionné(s)
