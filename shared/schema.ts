@@ -412,6 +412,37 @@ export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, "Refresh token is required"),
 });
 
+// Employee CRUD schemas
+export const createEmployeeSchema = z.object({
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  email: z.string().email("Invalid email format"),
+  departmentId: z.number().int().positive().optional(),
+  managerId: z.number().int().positive().optional(),
+  employeeNumber: z.string().optional(),
+  contractType: z.enum(['CDI', 'CDD', 'STAGE', 'FREELANCE', 'INTERIM']).default('CDI'),
+  hourlyRate: z.number().positive().optional(),
+  vacationDaysTotal: z.number().int().min(0).max(50).default(25),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format"),
+});
+
+export const updateEmployeeSchema = createEmployeeSchema.partial().extend({
+  isActive: z.boolean().optional(),
+  vacationDaysUsed: z.number().int().min(0).optional(),
+});
+
+export const employeeQuerySchema = z.object({
+  page: z.string().transform(val => parseInt(val) || 1).pipe(z.number().int().min(1)).optional(),
+  limit: z.string().transform(val => parseInt(val) || 10).pipe(z.number().int().min(1).max(100)).optional(),
+  search: z.string().optional(),
+  department: z.string().transform(val => parseInt(val)).pipe(z.number().int().positive()).optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+  sortBy: z.enum(['name', 'hire_date', 'department', 'created_at']).default('created_at'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
 // Departments schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({
   id: true,

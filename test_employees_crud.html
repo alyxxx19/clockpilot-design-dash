@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClockPilot Employee CRUD Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background: #f5f5f5;
+        }
+        .container { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px; 
+        }
+        .form-group { 
+            margin-bottom: 15px; 
+        }
+        label { 
+            display: block; 
+            margin-bottom: 5px; 
+            font-weight: bold;
+        }
+        input, select, textarea { 
+            width: 100%; 
+            padding: 8px 12px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            box-sizing: border-box;
+        }
+        button { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover { 
+            background: #0056b3; 
+        }
+        button.danger { 
+            background: #dc3545; 
+        }
+        button.danger:hover { 
+            background: #c82333; 
+        }
+        .success { 
+            background: #d4edda; 
+            color: #155724; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+        }
+        .error { 
+            background: #f8d7da; 
+            color: #721c24; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+        }
+        .response { 
+            background: #f8f9fa; 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0; 
+            white-space: pre-wrap; 
+            font-family: monospace;
+            border-left: 4px solid #007bff;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        h2 { 
+            color: #333; 
+            border-bottom: 2px solid #007bff; 
+            padding-bottom: 10px;
+        }
+        .employee-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+        .employee-card h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .flex {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>👥 ClockPilot Employee CRUD Test</h1>
+    
+    <!-- Auth Token -->
+    <div class="container">
+        <h2>🔑 Authentication</h2>
+        <div class="form-group">
+            <label for="authToken">Access Token:</label>
+            <input type="text" id="authToken" placeholder="Bearer token from login">
+        </div>
+        <button onclick="testAuthUser()">Test Token (Get Current User)</button>
+        <div id="authResponse"></div>
+    </div>
+
+    <div class="grid">
+        <!-- Create Employee -->
+        <div class="container">
+            <h2>➕ Create Employee</h2>
+            <form id="createEmployeeForm">
+                <div class="form-group">
+                    <label for="createFirstName">First Name:</label>
+                    <input type="text" id="createFirstName" required>
+                </div>
+                <div class="form-group">
+                    <label for="createLastName">Last Name:</label>
+                    <input type="text" id="createLastName" required>
+                </div>
+                <div class="form-group">
+                    <label for="createEmail">Email:</label>
+                    <input type="email" id="createEmail" required>
+                </div>
+                <div class="form-group">
+                    <label for="createHireDate">Hire Date:</label>
+                    <input type="date" id="createHireDate" required>
+                </div>
+                <div class="form-group">
+                    <label for="createDepartmentId">Department ID:</label>
+                    <input type="number" id="createDepartmentId" placeholder="Optional">
+                </div>
+                <div class="form-group">
+                    <label for="createContractType">Contract Type:</label>
+                    <select id="createContractType">
+                        <option value="CDI">CDI</option>
+                        <option value="CDD">CDD</option>
+                        <option value="STAGE">STAGE</option>
+                        <option value="FREELANCE">FREELANCE</option>
+                        <option value="INTERIM">INTERIM</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="createHourlyRate">Hourly Rate (€):</label>
+                    <input type="number" id="createHourlyRate" step="0.01" placeholder="Optional">
+                </div>
+                <button type="submit">Create Employee</button>
+            </form>
+            <div id="createResponse"></div>
+        </div>
+
+        <!-- List Employees -->
+        <div class="container">
+            <h2>📋 List Employees</h2>
+            <div class="form-group">
+                <label for="listPage">Page:</label>
+                <input type="number" id="listPage" value="1" min="1">
+            </div>
+            <div class="form-group">
+                <label for="listLimit">Limit:</label>
+                <input type="number" id="listLimit" value="10" min="1" max="100">
+            </div>
+            <div class="form-group">
+                <label for="listSearch">Search:</label>
+                <input type="text" id="listSearch" placeholder="Name, email, or employee number">
+            </div>
+            <div class="form-group">
+                <label for="listDepartment">Department ID:</label>
+                <input type="number" id="listDepartment" placeholder="Filter by department">
+            </div>
+            <div class="form-group">
+                <label for="listStatus">Status:</label>
+                <select id="listStatus">
+                    <option value="">All</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="listSortBy">Sort By:</label>
+                <select id="listSortBy">
+                    <option value="created_at">Created At</option>
+                    <option value="name">Name</option>
+                    <option value="hire_date">Hire Date</option>
+                    <option value="department">Department</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="listSortOrder">Sort Order:</label>
+                <select id="listSortOrder">
+                    <option value="desc">Descending</option>
+                    <option value="asc">Ascending</option>
+                </select>
+            </div>
+            <button onclick="listEmployees()">List Employees</button>
+            <div id="listResponse"></div>
+        </div>
+    </div>
+
+    <!-- Employee Details & Actions -->
+    <div class="container">
+        <h2>🔍 Employee Details & Actions</h2>
+        <div class="form-group">
+            <label for="employeeId">Employee ID:</label>
+            <input type="number" id="employeeId" placeholder="Enter employee ID">
+        </div>
+        <div class="flex">
+            <button onclick="getEmployee()">Get Employee Details</button>
+            <button onclick="getEmployeeStats()">Get Employee Stats</button>
+            <button class="danger" onclick="deleteEmployee()">Deactivate Employee</button>
+        </div>
+        <div id="detailsResponse"></div>
+    </div>
+
+    <!-- Update Employee -->
+    <div class="container">
+        <h2>✏️ Update Employee</h2>
+        <div class="form-group">
+            <label for="updateEmployeeId">Employee ID:</label>
+            <input type="number" id="updateEmployeeId" placeholder="Employee ID to update">
+        </div>
+        <div class="grid">
+            <div class="form-group">
+                <label for="updateFirstName">First Name:</label>
+                <input type="text" id="updateFirstName">
+            </div>
+            <div class="form-group">
+                <label for="updateLastName">Last Name:</label>
+                <input type="text" id="updateLastName">
+            </div>
+            <div class="form-group">
+                <label for="updatePhone">Phone:</label>
+                <input type="text" id="updatePhone">
+            </div>
+            <div class="form-group">
+                <label for="updateAddress">Address:</label>
+                <textarea id="updateAddress" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="updateDepartmentId">Department ID:</label>
+                <input type="number" id="updateDepartmentId">
+            </div>
+            <div class="form-group">
+                <label for="updateHourlyRate">Hourly Rate (€):</label>
+                <input type="number" id="updateHourlyRate" step="0.01">
+            </div>
+        </div>
+        <button onclick="updateEmployee()">Update Employee</button>
+        <div id="updateResponse"></div>
+    </div>
+
+    <!-- Test Departments -->
+    <div class="container">
+        <h2>🏢 Test Departments (for reference)</h2>
+        <button onclick="getDepartments()">Get All Departments</button>
+        <div id="departmentsResponse"></div>
+    </div>
+
+    <script>
+        function getAuthToken() {
+            return document.getElementById('authToken').value.trim();
+        }
+
+        function showResponse(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `
+                <div class="${isError ? 'error' : 'success'}">
+                    ${isError ? 'Error' : 'Success'}
+                </div>
+                <div class="response">${JSON.stringify(data, null, 2)}</div>
+            `;
+        }
+
+        async function makeRequest(url, method = 'GET', body = null) {
+            const token = getAuthToken();
+            if (!token) {
+                throw new Error('Please provide an access token');
+            }
+
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            };
+
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            try {
+                const response = await fetch(url, options);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw { status: response.status, data };
+                }
+                
+                return data;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // Auth Test
+        async function testAuthUser() {
+            try {
+                const result = await makeRequest('/api/auth/me');
+                showResponse('authResponse', result);
+            } catch (error) {
+                showResponse('authResponse', error, true);
+            }
+        }
+
+        // Create Employee
+        document.getElementById('createEmployeeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const employeeData = {
+                firstName: document.getElementById('createFirstName').value,
+                lastName: document.getElementById('createLastName').value,
+                email: document.getElementById('createEmail').value,
+                hireDate: document.getElementById('createHireDate').value,
+                contractType: document.getElementById('createContractType').value,
+            };
+
+            // Optional fields
+            const departmentId = document.getElementById('createDepartmentId').value;
+            if (departmentId) employeeData.departmentId = parseInt(departmentId);
+
+            const hourlyRate = document.getElementById('createHourlyRate').value;
+            if (hourlyRate) employeeData.hourlyRate = parseFloat(hourlyRate);
+
+            try {
+                const result = await makeRequest('/api/employees', 'POST', employeeData);
+                showResponse('createResponse', result);
+                
+                // Clear form
+                document.getElementById('createEmployeeForm').reset();
+                
+                // Auto-populate update form with created employee ID
+                if (result.data && result.data.employee) {
+                    document.getElementById('updateEmployeeId').value = result.data.employee.id;
+                    document.getElementById('employeeId').value = result.data.employee.id;
+                }
+            } catch (error) {
+                showResponse('createResponse', error, true);
+            }
+        });
+
+        // List Employees
+        async function listEmployees() {
+            try {
+                const params = new URLSearchParams();
+                
+                const page = document.getElementById('listPage').value;
+                if (page) params.append('page', page);
+                
+                const limit = document.getElementById('listLimit').value;
+                if (limit) params.append('limit', limit);
+                
+                const search = document.getElementById('listSearch').value;
+                if (search) params.append('search', search);
+                
+                const department = document.getElementById('listDepartment').value;
+                if (department) params.append('department', department);
+                
+                const status = document.getElementById('listStatus').value;
+                if (status) params.append('status', status);
+                
+                const sortBy = document.getElementById('listSortBy').value;
+                if (sortBy) params.append('sortBy', sortBy);
+                
+                const sortOrder = document.getElementById('listSortOrder').value;
+                if (sortOrder) params.append('sortOrder', sortOrder);
+
+                const result = await makeRequest(`/api/employees?${params.toString()}`);
+                
+                // Format response with employee cards
+                let formattedResponse = {
+                    pagination: result.pagination,
+                    employeeCount: result.data.length,
+                    employees: result.data
+                };
+                
+                showResponse('listResponse', formattedResponse);
+            } catch (error) {
+                showResponse('listResponse', error, true);
+            }
+        }
+
+        // Get Employee Details
+        async function getEmployee() {
+            const employeeId = document.getElementById('employeeId').value;
+            if (!employeeId) {
+                showResponse('detailsResponse', { error: 'Please enter an employee ID' }, true);
+                return;
+            }
+
+            try {
+                const result = await makeRequest(`/api/employees/${employeeId}`);
+                showResponse('detailsResponse', result);
+            } catch (error) {
+                showResponse('detailsResponse', error, true);
+            }
+        }
+
+        // Get Employee Stats
+        async function getEmployeeStats() {
+            const employeeId = document.getElementById('employeeId').value;
+            if (!employeeId) {
+                showResponse('detailsResponse', { error: 'Please enter an employee ID' }, true);
+                return;
+            }
+
+            try {
+                const result = await makeRequest(`/api/employees/${employeeId}/stats`);
+                showResponse('detailsResponse', result);
+            } catch (error) {
+                showResponse('detailsResponse', error, true);
+            }
+        }
+
+        // Update Employee
+        async function updateEmployee() {
+            const employeeId = document.getElementById('updateEmployeeId').value;
+            if (!employeeId) {
+                showResponse('updateResponse', { error: 'Please enter an employee ID' }, true);
+                return;
+            }
+
+            const updateData = {};
+            
+            const firstName = document.getElementById('updateFirstName').value;
+            if (firstName) updateData.firstName = firstName;
+            
+            const lastName = document.getElementById('updateLastName').value;
+            if (lastName) updateData.lastName = lastName;
+            
+            const phone = document.getElementById('updatePhone').value;
+            if (phone) updateData.phone = phone;
+            
+            const address = document.getElementById('updateAddress').value;
+            if (address) updateData.address = address;
+            
+            const departmentId = document.getElementById('updateDepartmentId').value;
+            if (departmentId) updateData.departmentId = parseInt(departmentId);
+            
+            const hourlyRate = document.getElementById('updateHourlyRate').value;
+            if (hourlyRate) updateData.hourlyRate = parseFloat(hourlyRate);
+
+            if (Object.keys(updateData).length === 0) {
+                showResponse('updateResponse', { error: 'Please provide at least one field to update' }, true);
+                return;
+            }
+
+            try {
+                const result = await makeRequest(`/api/employees/${employeeId}`, 'PUT', updateData);
+                showResponse('updateResponse', result);
+            } catch (error) {
+                showResponse('updateResponse', error, true);
+            }
+        }
+
+        // Delete Employee
+        async function deleteEmployee() {
+            const employeeId = document.getElementById('employeeId').value;
+            if (!employeeId) {
+                showResponse('detailsResponse', { error: 'Please enter an employee ID' }, true);
+                return;
+            }
+
+            if (!confirm('Are you sure you want to deactivate this employee?')) {
+                return;
+            }
+
+            try {
+                const result = await makeRequest(`/api/employees/${employeeId}`, 'DELETE');
+                showResponse('detailsResponse', result);
+            } catch (error) {
+                showResponse('detailsResponse', error, true);
+            }
+        }
+
+        // Get Departments (helper)
+        async function getDepartments() {
+            try {
+                const result = await makeRequest('/api/departments');
+                showResponse('departmentsResponse', result);
+            } catch (error) {
+                showResponse('departmentsResponse', error, true);
+            }
+        }
+
+        // Pre-fill some demo data
+        document.getElementById('createFirstName').value = 'Jean';
+        document.getElementById('createLastName').value = 'Dupont';
+        document.getElementById('createEmail').value = 'jean.dupont@clockpilot.com';
+        document.getElementById('createHireDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('createDepartmentId').value = '1';
+        document.getElementById('createHourlyRate').value = '25.50';
+    </script>
+</body>
+</html>

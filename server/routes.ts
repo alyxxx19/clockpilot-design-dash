@@ -8,6 +8,9 @@ import {
   registerSchema, 
   loginSchema, 
   refreshTokenSchema,
+  createEmployeeSchema,
+  updateEmployeeSchema,
+  employeeQuerySchema,
   type User,
   type Employee 
 } from "@shared/schema";
@@ -447,19 +450,345 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
-  // PROTECTED ROUTES EXAMPLES
+  // EMPLOYEE CRUD ENDPOINTS
   // ========================================
 
-  // GET /api/employees - Admin only
+  // GET /api/employees - List employees with pagination and filters (Admin only)
   app.get('/api/employees', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
     try {
-      const employees = await storage.getAllEmployees();
-      res.json({ employees });
+      // Validate query parameters
+      const queryValidation = employeeQuerySchema.safeParse(req.query);
+      if (!queryValidation.success) {
+        return res.status(400).json({
+          error: 'Invalid query parameters',
+          code: 'VALIDATION_ERROR',
+          details: queryValidation.error.errors,
+        });
+      }
+
+      const { page = 1, limit = 10, search, department, status, sortBy, sortOrder } = queryValidation.data;
+
+      const result = await storage.getEmployeesWithPagination(page, limit, {
+        search,
+        department,
+        status,
+        sortBy,
+        sortOrder,
+      });
+
+      res.json({
+        message: 'Employees retrieved successfully',
+        data: result.employees,
+        pagination: {
+          page: result.page,
+          limit,
+          total: result.total,
+          totalPages: result.totalPages,
+          hasNext: result.page < result.totalPages,
+          hasPrev: result.page > 1,
+        },
+      });
     } catch (error) {
       console.error('Get employees error:', error);
       res.status(500).json({
         error: 'Failed to fetch employees',
         code: 'FETCH_EMPLOYEES_ERROR'
+      });
+    }
+  });
+
+  // GET /api/employees/:id - Get employee details (Admin or self)
+  app.get('/api/employees/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      // Check permissions - admin can see all, employees can only see themselves
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only view own profile',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      const employee = await storage.getEmployeeWithDetails(employeeId);
+      if (!employee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      res.json({
+        message: 'Employee retrieved successfully',
+        data: employee,
+      });
+    } catch (error) {
+      console.error('Get employee error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch employee',
+        code: 'FETCH_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // POST /api/employees - Create new employee (Admin only)
+  app.post('/api/employees', authenticateToken, authorizeRole(['admin']), validateRequest(createEmployeeSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeData = req.body;
+
+      // Check if email already exists
+      const existingUser = await storage.getUserByEmail(employeeData.email);
+      if (existingUser) {
+        return res.status(409).json({
+          error: 'Email already exists',
+          code: 'EMAIL_EXISTS'
+        });
+      }
+
+      // Generate temporary password
+      const tempPassword = Math.random().toString(36).slice(-12);
+      const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
+      // Generate employee number if not provided
+      const employeeNumber = employeeData.employeeNumber || `EMP${Date.now().toString().slice(-6)}`;
+
+      // Create user account
+      const newUser = await storage.createUser({
+        username: employeeData.email.split('@')[0], // Use email prefix as username
+        email: employeeData.email,
+        password: hashedPassword,
+        role: 'employee',
+      });
+
+      // Create employee record
+      const newEmployee = await storage.createEmployee({
+        user_id: newUser.id,
+        employee_number: employeeNumber,
+        first_name: employeeData.firstName,
+        last_name: employeeData.lastName,
+        department_id: employeeData.departmentId,
+        manager_id: employeeData.managerId,
+        hire_date: employeeData.hireDate,
+        contract_type: employeeData.contractType,
+        hourly_rate: employeeData.hourlyRate,
+        vacation_days_total: employeeData.vacationDaysTotal,
+        phone: employeeData.phone,
+        address: employeeData.address,
+      });
+
+      // TODO: Send welcome email with temporary password
+      console.log(`Welcome email should be sent to ${employeeData.email} with temp password: ${tempPassword}`);
+
+      res.status(201).json({
+        message: 'Employee created successfully',
+        data: {
+          employee: newEmployee,
+          user: {
+            id: newUser.id,
+            email: newUser.email,
+            username: newUser.username,
+          },
+          temporaryPassword: tempPassword, // In production, this should be sent via email only
+        },
+      });
+    } catch (error) {
+      console.error('Create employee error:', error);
+      res.status(500).json({
+        error: 'Failed to create employee',
+        code: 'CREATE_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // PUT /api/employees/:id - Update employee (Admin or self with restrictions)
+  app.put('/api/employees/:id', authenticateToken, validateRequest(updateEmployeeSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      const updateData = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Check permissions
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only update own profile',
+            code: 'ACCESS_DENIED'
+          });
+        }
+
+        // Employees can only update limited fields
+        const allowedFields = ['phone', 'address'];
+        const updateFields = Object.keys(updateData);
+        const restrictedFields = updateFields.filter(field => !allowedFields.includes(field));
+        
+        if (restrictedFields.length > 0) {
+          return res.status(403).json({
+            error: 'Access denied - cannot update restricted fields',
+            code: 'RESTRICTED_FIELDS',
+            restrictedFields,
+            allowedFields,
+          });
+        }
+      }
+
+      // Verify employee exists
+      const existingEmployee = await storage.getEmployee(employeeId);
+      if (!existingEmployee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      // Convert frontend field names to database field names
+      const dbUpdateData: any = {};
+      if (updateData.firstName) dbUpdateData.first_name = updateData.firstName;
+      if (updateData.lastName) dbUpdateData.last_name = updateData.lastName;
+      if (updateData.departmentId) dbUpdateData.department_id = updateData.departmentId;
+      if (updateData.managerId) dbUpdateData.manager_id = updateData.managerId;
+      if (updateData.employeeNumber) dbUpdateData.employee_number = updateData.employeeNumber;
+      if (updateData.contractType) dbUpdateData.contract_type = updateData.contractType;
+      if (updateData.hourlyRate) dbUpdateData.hourly_rate = updateData.hourlyRate;
+      if (updateData.vacationDaysTotal) dbUpdateData.vacation_days_total = updateData.vacationDaysTotal;
+      if (updateData.vacationDaysUsed !== undefined) dbUpdateData.vacation_days_used = updateData.vacationDaysUsed;
+      if (updateData.isActive !== undefined) dbUpdateData.is_active = updateData.isActive;
+      if (updateData.phone) dbUpdateData.phone = updateData.phone;
+      if (updateData.address) dbUpdateData.address = updateData.address;
+      if (updateData.hireDate) dbUpdateData.hire_date = updateData.hireDate;
+
+      // Update employee
+      const updatedEmployee = await storage.updateEmployee(employeeId, dbUpdateData);
+      if (!updatedEmployee) {
+        return res.status(500).json({
+          error: 'Failed to update employee',
+          code: 'UPDATE_FAILED'
+        });
+      }
+
+      // TODO: Log the changes for audit trail
+      console.log(`Employee ${employeeId} updated by user ${req.user!.id}:`, Object.keys(dbUpdateData));
+
+      res.json({
+        message: 'Employee updated successfully',
+        data: updatedEmployee,
+      });
+    } catch (error) {
+      console.error('Update employee error:', error);
+      res.status(500).json({
+        error: 'Failed to update employee',
+        code: 'UPDATE_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // DELETE /api/employees/:id - Soft delete employee (Admin only)
+  app.delete('/api/employees/:id', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      // Verify employee exists
+      const existingEmployee = await storage.getEmployee(employeeId);
+      if (!existingEmployee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      // Soft delete (will check for future planning entries)
+      const deletedEmployee = await storage.softDeleteEmployee(employeeId);
+      
+      if (!deletedEmployee) {
+        return res.status(500).json({
+          error: 'Failed to deactivate employee',
+          code: 'DELETE_FAILED'
+        });
+      }
+
+      res.json({
+        message: 'Employee deactivated successfully',
+        data: deletedEmployee,
+      });
+    } catch (error) {
+      console.error('Delete employee error:', error);
+      if (error instanceof Error && error.message.includes('future planning entries')) {
+        return res.status(409).json({
+          error: error.message,
+          code: 'HAS_FUTURE_PLANNING'
+        });
+      }
+      
+      res.status(500).json({
+        error: 'Failed to deactivate employee',
+        code: 'DELETE_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // GET /api/employees/:id/stats - Get employee statistics (Admin or self)
+  app.get('/api/employees/:id/stats', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      // Check permissions - admin can see all, employees can only see themselves
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only view own stats',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      const stats = await storage.getEmployeeStats(employeeId);
+      if (!stats) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      res.json({
+        message: 'Employee statistics retrieved successfully',
+        data: stats,
+      });
+    } catch (error) {
+      console.error('Get employee stats error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch employee statistics',
+        code: 'FETCH_STATS_ERROR'
       });
     }
   });

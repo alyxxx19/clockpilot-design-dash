@@ -25,7 +25,7 @@ import {
   type InsertTask,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, like, or } from "drizzle-orm";
 
 // ============================================================================
 // STORAGE INTERFACE - Define all CRUD operations needed by the application
@@ -46,6 +46,22 @@ export interface IStorage {
   getEmployeesByManager(managerId: number): Promise<Employee[]>;
   createEmployee(employee: InsertEmployee): Promise<Employee>;
   updateEmployee(id: number, employee: Partial<InsertEmployee>): Promise<Employee | undefined>;
+  
+  // Advanced employee queries
+  getEmployeesWithPagination(
+    page: number, 
+    limit: number, 
+    filters?: { 
+      search?: string; 
+      department?: number; 
+      status?: string; 
+      sortBy?: string; 
+      sortOrder?: string; 
+    }
+  ): Promise<{ employees: any[]; total: number; page: number; totalPages: number; }>;
+  getEmployeeWithDetails(id: number): Promise<any>;
+  getEmployeeStats(id: number): Promise<any>;
+  softDeleteEmployee(id: number): Promise<Employee | undefined>;
 
   // Departments
   getDepartment(id: number): Promise<Department | undefined>;
@@ -165,6 +181,327 @@ export class DatabaseStorage implements IStorage {
       .set({ ...updateEmployee, updated_at: new Date() })
       .where(eq(employees.id, id))
       .returning();
+    return employee || undefined;
+  }
+
+  // ========================================
+  // ADVANCED EMPLOYEE OPERATIONS
+  // ========================================
+  async getEmployeesWithPagination(
+    page: number = 1, 
+    limit: number = 10, 
+    filters?: { 
+      search?: string; 
+      department?: number; 
+      status?: string; 
+      sortBy?: string; 
+      sortOrder?: string; 
+    }
+  ): Promise<{ employees: any[]; total: number; page: number; totalPages: number; }> {
+    const offset = (page - 1) * limit;
+    const isActive = filters?.status === 'active' ? true : filters?.status === 'inactive' ? false : undefined;
+    
+    // Build conditions array
+    const conditions = [];
+    
+    if (isActive !== undefined) {
+      conditions.push(eq(employees.is_active, isActive));
+    }
+    
+    if (filters?.department) {
+      conditions.push(eq(employees.department_id, filters.department));
+    }
+    
+    if (filters?.search) {
+      const searchTerm = `%${filters.search.toLowerCase()}%`;
+      conditions.push(
+        or(
+          like(employees.first_name, searchTerm),
+          like(employees.last_name, searchTerm),
+          like(users.email, searchTerm),
+          like(employees.employee_number, searchTerm)
+        )
+      );
+    }
+
+    // Main query with joins
+    let query = db
+      .select({
+        id: employees.id,
+        userId: employees.user_id,
+        employeeNumber: employees.employee_number,
+        firstName: employees.first_name,
+        lastName: employees.last_name,
+        departmentId: employees.department_id,
+        managerId: employees.manager_id,
+        hireDate: employees.hire_date,
+        contractType: employees.contract_type,
+        hourlyRate: employees.hourly_rate,
+        vacationDaysTotal: employees.vacation_days_total,
+        vacationDaysUsed: employees.vacation_days_used,
+        isActive: employees.is_active,
+        phone: employees.phone,
+        address: employees.address,
+        createdAt: employees.created_at,
+        updatedAt: employees.updated_at,
+        userEmail: users.email,
+        userRole: users.role,
+        departmentName: departments.name,
+      })
+      .from(employees)
+      .leftJoin(users, eq(employees.user_id, users.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id));
+
+    // Apply WHERE conditions
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    // Apply ORDER BY
+    const sortDirection = filters?.sortOrder === 'asc' ? asc : desc;
+    switch (filters?.sortBy) {
+      case 'name':
+        query = query.orderBy(sortDirection(employees.last_name), sortDirection(employees.first_name));
+        break;
+      case 'hire_date':
+        query = query.orderBy(sortDirection(employees.hire_date));
+        break;
+      case 'department':
+        query = query.orderBy(sortDirection(departments.name));
+        break;
+      default:
+        query = query.orderBy(sortDirection(employees.created_at));
+    }
+
+    // Apply pagination
+    query = query.limit(limit).offset(offset);
+
+    // Count query
+    let countQuery = db
+      .select({ count: sql<number>`count(*)` })
+      .from(employees)
+      .leftJoin(users, eq(employees.user_id, users.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id));
+    
+    if (conditions.length > 0) {
+      countQuery = countQuery.where(and(...conditions));
+    }
+
+    // Execute both queries
+    const [employeesResult, countResult] = await Promise.all([
+      query,
+      countQuery
+    ]);
+
+    const total = countResult[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      employees: employeesResult,
+      total,
+      page,
+      totalPages,
+    };
+  }
+
+  async getEmployeeWithDetails(id: number): Promise<any> {
+    const [employee] = await db
+      .select({
+        id: employees.id,
+        userId: employees.user_id,
+        employeeNumber: employees.employee_number,
+        firstName: employees.first_name,
+        lastName: employees.last_name,
+        departmentId: employees.department_id,
+        managerId: employees.manager_id,
+        hireDate: employees.hire_date,
+        contractType: employees.contract_type,
+        hourlyRate: employees.hourly_rate,
+        vacationDaysTotal: employees.vacation_days_total,
+        vacationDaysUsed: employees.vacation_days_used,
+        isActive: employees.is_active,
+        phone: employees.phone,
+        address: employees.address,
+        createdAt: employees.created_at,
+        updatedAt: employees.updated_at,
+        // User data
+        userEmail: users.email,
+        userRole: users.role,
+        userUsername: users.username,
+        // Department data
+        departmentName: departments.name,
+        departmentDescription: departments.description,
+      })
+      .from(employees)
+      .leftJoin(users, eq(employees.user_id, users.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id))
+      .where(eq(employees.id, id));
+
+    if (!employee) return undefined;
+
+    // Get manager info if exists
+    let manager = null;
+    if (employee.managerId) {
+      const [managerData] = await db
+        .select({
+          id: employees.id,
+          firstName: employees.first_name,
+          lastName: employees.last_name,
+          email: users.email,
+        })
+        .from(employees)
+        .leftJoin(users, eq(employees.user_id, users.id))
+        .where(eq(employees.id, employee.managerId));
+      
+      manager = managerData || null;
+    }
+
+    // Get subordinates
+    const subordinates = await db
+      .select({
+        id: employees.id,
+        firstName: employees.first_name,
+        lastName: employees.last_name,
+        email: users.email,
+      })
+      .from(employees)
+      .leftJoin(users, eq(employees.user_id, users.id))
+      .where(eq(employees.manager_id, id));
+
+    return {
+      ...employee,
+      manager,
+      subordinates,
+    };
+  }
+
+  async getEmployeeStats(id: number): Promise<any> {
+    const employee = await this.getEmployee(id);
+    if (!employee) return null;
+
+    // Calculate date ranges
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay() + 1); // Monday
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+
+    // Get time entries stats (this week, this month)
+    const thisWeekHours = await db
+      .select({ totalHours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))/3600), 0)` })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, id),
+          gte(timeEntries.date, weekStart.toISOString().split('T')[0]),
+          eq(timeEntries.status, 'validated')
+        )
+      );
+
+    const thisMonthHours = await db
+      .select({ totalHours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))/3600), 0)` })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, id),
+          gte(timeEntries.date, monthStart.toISOString().split('T')[0]),
+          eq(timeEntries.status, 'validated')
+        )
+      );
+
+    // Get vacation stats
+    const vacationTaken = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(planningEntries)
+      .where(
+        and(
+          eq(planningEntries.employee_id, id),
+          eq(planningEntries.type, 'vacation'),
+          eq(planningEntries.status, 'validated'),
+          gte(planningEntries.date, yearStart.toISOString().split('T')[0])
+        )
+      );
+
+    // Get validation rate (percentage of submitted entries that are validated)
+    const totalSubmitted = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, id),
+          sql`status IN ('submitted', 'validated', 'rejected')`
+        )
+      );
+
+    const totalValidated = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, id),
+          eq(timeEntries.status, 'validated')
+        )
+      );
+
+    // Get active projects
+    const activeProjects = await db
+      .select({
+        projectId: projects.id,
+        projectName: projects.name,
+        projectStatus: projects.status,
+        role: projectAssignments.role,
+      })
+      .from(projectAssignments)
+      .leftJoin(projects, eq(projectAssignments.project_id, projects.id))
+      .where(
+        and(
+          eq(projectAssignments.employee_id, id),
+          eq(projects.status, 'active')
+        )
+      );
+
+    const submittedCount = totalSubmitted[0]?.count || 0;
+    const validatedCount = totalValidated[0]?.count || 0;
+    const validationRate = submittedCount > 0 ? (validatedCount / submittedCount) * 100 : 0;
+
+    return {
+      weeklyHours: thisWeekHours[0]?.totalHours || 0,
+      monthlyHours: thisMonthHours[0]?.totalHours || 0,
+      vacationDaysUsed: employee.vacation_days_used,
+      vacationDaysRemaining: employee.vacation_days_total - employee.vacation_days_used,
+      validationRate: Math.round(validationRate * 100) / 100,
+      totalSubmissions: submittedCount,
+      totalValidated: validatedCount,
+      activeProjects: activeProjects,
+    };
+  }
+
+  async softDeleteEmployee(id: number): Promise<Employee | undefined> {
+    // Check for future planning entries
+    const futureEntries = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(planningEntries)
+      .where(
+        and(
+          eq(planningEntries.employee_id, id),
+          gte(planningEntries.date, new Date().toISOString().split('T')[0])
+        )
+      );
+
+    if ((futureEntries[0]?.count || 0) > 0) {
+      throw new Error('Cannot deactivate employee with future planning entries');
+    }
+
+    // Soft delete (set as inactive)
+    const [employee] = await db
+      .update(employees)
+      .set({ 
+        is_active: false, 
+        updated_at: new Date() 
+      })
+      .where(eq(employees.id, id))
+      .returning();
+
     return employee || undefined;
   }
 
