@@ -393,6 +393,25 @@ export const insertUserSchema = createInsertSchema(users).omit({
 
 export const selectUserSchema = createInsertSchema(users);
 
+// Auth schemas
+export const registerSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  email: z.string().email("Invalid email format"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  role: z.enum(['admin', 'employee']).default('employee'),
+});
+
+export const loginSchema = z.object({
+  email: z.string().email("Invalid email format"),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const refreshTokenSchema = z.object({
+  refreshToken: z.string().min(1, "Refresh token is required"),
+});
+
 // Departments schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({
   id: true,

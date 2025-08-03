@@ -257,24 +257,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPlanningEntriesByEmployee(employeeId: number, startDate?: string, endDate?: string): Promise<PlanningEntry[]> {
-    let query = db.select().from(planningEntries).where(eq(planningEntries.employee_id, employeeId));
-    
     if (startDate && endDate) {
-      query = query.where(
-        and(
-          eq(planningEntries.employee_id, employeeId),
-          gte(planningEntries.date, startDate),
-          lte(planningEntries.date, endDate)
+      return await db.select().from(planningEntries)
+        .where(
+          and(
+            eq(planningEntries.employee_id, employeeId),
+            gte(planningEntries.date, startDate),
+            lte(planningEntries.date, endDate)
+          )
         )
-      );
+        .orderBy(asc(planningEntries.date));
     }
     
-    return await query.orderBy(asc(planningEntries.date));
+    return await db.select().from(planningEntries)
+      .where(eq(planningEntries.employee_id, employeeId))
+      .orderBy(asc(planningEntries.date));
   }
 
   async getPlanningEntriesByStatus(status: string): Promise<PlanningEntry[]> {
     return await db.select().from(planningEntries)
-      .where(eq(planningEntries.status, status))
+      .where(eq(planningEntries.status, status as any))
       .orderBy(desc(planningEntries.created_at));
   }
 
@@ -304,19 +306,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTimeEntriesByEmployee(employeeId: number, startDate?: string, endDate?: string): Promise<TimeEntry[]> {
-    let query = db.select().from(timeEntries).where(eq(timeEntries.employee_id, employeeId));
-    
     if (startDate && endDate) {
-      query = query.where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, startDate),
-          lte(timeEntries.date, endDate)
+      return await db.select().from(timeEntries)
+        .where(
+          and(
+            eq(timeEntries.employee_id, employeeId),
+            gte(timeEntries.date, startDate),
+            lte(timeEntries.date, endDate)
+          )
         )
-      );
+        .orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
     }
     
-    return await query.orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
+    return await db.select().from(timeEntries)
+      .where(eq(timeEntries.employee_id, employeeId))
+      .orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
   }
 
   async getTimeEntriesByProject(projectId: number): Promise<TimeEntry[]> {
