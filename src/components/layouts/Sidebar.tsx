@@ -17,7 +17,6 @@ const navigation = [
   { name: 'Dashboard', href: '/employee/dashboard', icon: LayoutDashboard },
   { name: 'Mon Planning', href: '/employee/planning', icon: Calendar },
   { name: 'Saisie des heures', href: '/employee/time-entry', icon: Clock },
-  { name: 'Comparaison', href: '/employee/schedule-comparison', icon: GitCompare },
   { name: 'Tâches', href: '/employee/tasks', icon: CheckSquare },
   { name: 'Rapports', href: '/employee/reports', icon: BarChart3 },
 ];

@@ -103,11 +103,6 @@ const AppRoutes = () => {
           <TimeEntry />
         </ProtectedRoute>
       } />
-      <Route path="/employee/schedule-comparison" element={
-        <ProtectedRoute allowedRole="employee">
-          <ScheduleComparison />
-        </ProtectedRoute>
-      } />
       <Route path="/employee/tasks" element={
         <ProtectedRoute allowedRole="employee">
           <Tasks />
