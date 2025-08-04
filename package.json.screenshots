@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "screenshots:generate": "node scripts/run-screenshots.js",
+    "screenshots:optimize": "node scripts/optimize-images.js",
+    "screenshots:gifs": "node scripts/create-gif.js",
+    "screenshots:placeholders": "python3 scripts/create-demo-images.py",
+    "screenshots:update": "npm run screenshots:generate && npm run screenshots:optimize",
+    "screenshots:verify": "find docs/screenshots -name '*.png' -exec identify {} \\; | grep -v '1200x800'",
+    "docs:visual": "npm run screenshots:update && echo 'Documentation visuelle mise à jour'"
+  }
+}
