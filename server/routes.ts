@@ -263,6 +263,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PRODUCTION MIDDLEWARE & SECURITY SETUP
   // ============================================================================
   
+  // Configure trust proxy for rate limiting and security
+  app.set('trust proxy', 1);
+  
   // Apply security middleware in production
   if (process.env.NODE_ENV === 'production') {
     app.use(securityMiddleware);

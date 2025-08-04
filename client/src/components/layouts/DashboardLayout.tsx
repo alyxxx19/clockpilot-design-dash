@@ -10,7 +10,8 @@ import {
   LogOut,
   Menu,
   X,
-  CheckSquare
+  CheckSquare,
+  Timer
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -55,6 +56,12 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
       label: 'Saisie heures', 
       path: '/employee/time-entry',
       key: 'time-entry'
+    },
+    { 
+      icon: Timer, 
+      label: 'Pointage temps réel', 
+      path: '/employee/time-tracking',
+      key: 'time-tracking'
     },
     { 
       icon: CheckSquare, 

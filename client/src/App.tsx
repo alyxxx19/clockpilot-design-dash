@@ -20,6 +20,7 @@ import { Settings as AdminSettings } from "./pages/admin/Settings";
 import { EmployeeDashboard } from "./pages/employee/EmployeeDashboard";
 import { Planning } from "./pages/employee/Planning";
 import { TimeEntry } from "./pages/employee/TimeEntry";
+import TimeTracking from "./pages/employee/TimeTracking";
 import { Tasks } from "./pages/employee/Tasks";
 import { Reports } from "./pages/employee/Reports";
 import { Settings } from "./pages/employee/Settings";
@@ -128,6 +129,11 @@ const AppRoutes = () => {
       <Route path="/employee/time-entry" element={
         <ProtectedRoute allowedRole="employee">
           <TimeEntry />
+        </ProtectedRoute>
+      } />
+      <Route path="/employee/time-tracking" element={
+        <ProtectedRoute allowedRole="employee">
+          <TimeTracking />
         </ProtectedRoute>
       } />
       <Route path="/employee/tasks" element={
