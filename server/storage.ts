@@ -1127,6 +1127,452 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
+  // TIME ENTRIES
+  // ========================================
+
+  async getTimeEntries(params: {
+    employeeId?: number;
+    dateFrom?: string;
+    dateTo?: string;
+    status?: string;
+    projectId?: number;
+    taskId?: number;
+    hasOvertime?: boolean;
+    hasAnomalies?: boolean;
+    minHours?: number;
+    maxHours?: number;
+    groupBy?: 'day' | 'week' | 'month';
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    data: any[];
+    totals: any;
+    anomalies: any[];
+  }> {
+    const {
+      employeeId,
+      dateFrom,
+      dateTo,
+      status,
+      projectId,
+      taskId,
+      hasOvertime,
+      hasAnomalies,
+      minHours,
+      maxHours,
+      groupBy = 'day',
+      sortBy = 'date',
+      sortOrder = 'desc',
+      limit = 20,
+      offset = 0
+    } = params;
+
+    let query = db
+      .select({
+        id: timeEntries.id,
+        employeeId: timeEntries.employee_id,
+        date: timeEntries.date,
+        startTime: timeEntries.start_time,
+        endTime: timeEntries.end_time,
+        type: timeEntries.type,
+        category: timeEntries.category,
+        description: timeEntries.description,
+        status: timeEntries.status,
+        projectId: timeEntries.project_id,
+        locationLatitude: timeEntries.location_latitude,
+        locationLongitude: timeEntries.location_longitude,
+        locationAddress: timeEntries.location_address,
+        validatedBy: timeEntries.validated_by,
+        validatedAt: timeEntries.validated_at,
+        createdAt: timeEntries.created_at,
+        updatedAt: timeEntries.updated_at,
+        employeeFirstName: employees.first_name,
+        employeeLastName: employees.last_name,
+        employeeNumber: employees.employee_number,
+        projectName: projects.name,
+      })
+      .from(timeEntries)
+      .leftJoin(employees, eq(timeEntries.employee_id, employees.id))
+      .leftJoin(projects, eq(timeEntries.project_id, projects.id));
+
+    const conditions: any[] = [];
+
+    if (employeeId) conditions.push(eq(timeEntries.employee_id, employeeId));
+    if (dateFrom) conditions.push(gte(timeEntries.date, dateFrom));
+    if (dateTo) conditions.push(lte(timeEntries.date, dateTo));
+    if (status) conditions.push(eq(timeEntries.status, status as any));
+    if (projectId) conditions.push(eq(timeEntries.project_id, projectId));
+    // Note: tasks table relationship needs to be implemented separately if needed
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    // Sorting
+    const orderColumn = sortBy === 'employee' ? employees.last_name :
+                       sortBy === 'project' ? projects.name :
+                       sortBy === 'created_at' ? timeEntries.created_at :
+                       timeEntries.date;
+    
+    query = query.orderBy(sortOrder === 'desc' ? desc(orderColumn) : asc(orderColumn));
+
+    // Pagination
+    const data = await query.limit(limit).offset(offset);
+
+    // Calculate totals
+    const countQuery = db
+      .select({
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(timeEntries);
+
+    if (conditions.length > 0) {
+      countQuery.where(and(...conditions));
+    }
+
+    const [{ count }] = await countQuery;
+
+    // Calculate working hours for each entry
+    const dataWithCalculations = data.map(entry => {
+      let workingHours = 0;
+      if (entry.startTime && entry.endTime) {
+        const start = new Date(`1970-01-01T${entry.startTime}:00`);
+        const end = new Date(`1970-01-01T${entry.endTime}:00`);
+        workingHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      }
+      
+      return {
+        ...entry,
+        workingHours: Math.round(workingHours * 100) / 100,
+        isOvertime: workingHours > 8
+      };
+    });
+
+    const totalHours = dataWithCalculations.reduce((sum, entry) => sum + entry.workingHours, 0);
+    const overtimeHours = dataWithCalculations
+      .filter(entry => entry.isOvertime)
+      .reduce((sum, entry) => sum + Math.max(0, entry.workingHours - 8), 0);
+
+    return {
+      data: dataWithCalculations,
+      totals: { 
+        totalHours: Math.round(totalHours * 100) / 100, 
+        overtimeHours: Math.round(overtimeHours * 100) / 100, 
+        count 
+      },
+      anomalies: [] // Will be implemented with business logic
+    };
+  }
+
+  async createTimeEntry(entry: InsertTimeEntry): Promise<TimeEntry> {
+    // Calculate total hours and overtime
+    const startTime = new Date(`1970-01-01T${entry.start_time}:00`);
+    const endTime = new Date(`1970-01-01T${entry.end_time}:00`);
+    const breakMinutes = entry.break_duration || 0;
+    
+    const totalMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60) - breakMinutes;
+    const totalHours = Math.max(0, totalMinutes / 60);
+    
+    // Calculate overtime (over 8 hours per day)
+    const standardHours = 8;
+    const overtimeHours = Math.max(0, totalHours - standardHours);
+
+    const entryWithCalculations = {
+      ...entry,
+      total_hours: totalHours,
+      overtime_hours: overtimeHours,
+      is_overtime: overtimeHours > 0 || entry.is_overtime || false,
+      status: 'draft' as const,
+    };
+
+    const [newEntry] = await db
+      .insert(timeEntries)
+      .values(entryWithCalculations)
+      .returning();
+
+    return newEntry;
+  }
+
+  async updateTimeEntry(id: number, data: Partial<InsertTimeEntry>): Promise<TimeEntry | undefined> {
+    // Recalculate if time fields are updated
+    let updateData = { ...data };
+    
+    if (data.start_time || data.end_time || data.break_duration !== undefined) {
+      const currentEntry = await this.getTimeEntry(id);
+      if (!currentEntry) return undefined;
+
+      const startTime = data.start_time || currentEntry.start_time;
+      const endTime = data.end_time || currentEntry.end_time;
+      const breakMinutes = data.break_duration !== undefined ? data.break_duration : currentEntry.break_duration;
+
+      const startTimeDate = new Date(`1970-01-01T${startTime}:00`);
+      const endTimeDate = new Date(`1970-01-01T${endTime}:00`);
+      
+      const totalMinutes = (endTimeDate.getTime() - startTimeDate.getTime()) / (1000 * 60) - breakMinutes;
+      const totalHours = Math.max(0, totalMinutes / 60);
+      
+      const standardHours = 8;
+      const overtimeHours = Math.max(0, totalHours - standardHours);
+
+      updateData = {
+        ...updateData,
+        total_hours: totalHours,
+        overtime_hours: overtimeHours,
+        is_overtime: overtimeHours > 0 || data.is_overtime || false,
+      };
+    }
+
+    const [updatedEntry] = await db
+      .update(timeEntries)
+      .set({ ...updateData, updated_at: new Date() })
+      .where(eq(timeEntries.id, id))
+      .returning();
+
+    return updatedEntry || undefined;
+  }
+
+  async getTimeEntry(id: number): Promise<TimeEntry | undefined> {
+    const [entry] = await db
+      .select()
+      .from(timeEntries)
+      .where(eq(timeEntries.id, id));
+    return entry || undefined;
+  }
+
+  async deleteTimeEntry(id: number): Promise<boolean> {
+    const result = await db
+      .delete(timeEntries)
+      .where(eq(timeEntries.id, id));
+    return result.rowCount > 0;
+  }
+
+  async bulkCreateTimeEntries(entries: InsertTimeEntry[]): Promise<TimeEntry[]> {
+    const entriesWithCalculations = entries.map(entry => {
+      const startTime = new Date(`1970-01-01T${entry.start_time}:00`);
+      const endTime = new Date(`1970-01-01T${entry.end_time}:00`);
+      const breakMinutes = entry.break_duration || 0;
+      
+      const totalMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60) - breakMinutes;
+      const totalHours = Math.max(0, totalMinutes / 60);
+      
+      const standardHours = 8;
+      const overtimeHours = Math.max(0, totalHours - standardHours);
+
+      return {
+        ...entry,
+        total_hours: totalHours,
+        overtime_hours: overtimeHours,
+        is_overtime: overtimeHours > 0 || entry.is_overtime || false,
+        status: 'draft' as const,
+      };
+    });
+
+    const newEntries = await db
+      .insert(timeEntries)
+      .values(entriesWithCalculations)
+      .returning();
+
+    return newEntries;
+  }
+
+  async detectTimeAnomalies(employeeId: number, dateFrom: string, dateTo: string): Promise<any[]> {
+    const entries = await this.getTimeEntries({
+      employeeId,
+      dateFrom,
+      dateTo,
+      limit: 1000,
+      offset: 0
+    });
+
+    const anomalies: any[] = [];
+
+    // Group by date for daily analysis
+    const dailyEntries: Record<string, any[]> = {};
+    entries.data.forEach(entry => {
+      if (!dailyEntries[entry.date]) dailyEntries[entry.date] = [];
+      dailyEntries[entry.date].push(entry);
+    });
+
+    // Detect anomalies
+    for (const [date, dayEntries] of Object.entries(dailyEntries)) {
+      const totalHours = dayEntries.reduce((sum, entry) => sum + (entry.totalHours || 0), 0);
+      
+      // Check for excessive daily hours
+      if (totalHours > 10) {
+        anomalies.push({
+          type: 'excessive_daily_hours',
+          severity: 'error',
+          employeeId,
+          date,
+          description: `Dépassement de 10h journalières: ${totalHours.toFixed(2)}h`,
+          entries: dayEntries.map(e => e.id)
+        });
+      }
+
+      // Check for missing breaks (if over 6 hours without break)
+      const hasLongEntry = dayEntries.some(entry => {
+        const hours = entry.totalHours || 0;
+        const breakDuration = entry.breakDuration || 0;
+        return hours > 6 && breakDuration < 30; // Less than 30min break for 6+ hour work
+      });
+
+      if (hasLongEntry) {
+        anomalies.push({
+          type: 'missing_break',
+          severity: 'warning',
+          employeeId,
+          date,
+          description: 'Pause manquante pour une journée de plus de 6h',
+          entries: dayEntries.filter(e => (e.totalHours || 0) > 6 && (e.breakDuration || 0) < 30).map(e => e.id)
+        });
+      }
+
+      // Check for overlapping entries
+      for (let i = 0; i < dayEntries.length - 1; i++) {
+        for (let j = i + 1; j < dayEntries.length; j++) {
+          const entry1 = dayEntries[i];
+          const entry2 = dayEntries[j];
+          
+          const start1 = new Date(`1970-01-01T${entry1.startTime}:00`);
+          const end1 = new Date(`1970-01-01T${entry1.endTime}:00`);
+          const start2 = new Date(`1970-01-01T${entry2.startTime}:00`);
+          const end2 = new Date(`1970-01-01T${entry2.endTime}:00`);
+
+          if ((start1 < end2 && end1 > start2)) {
+            anomalies.push({
+              type: 'overlapping_entries',
+              severity: 'error',
+              employeeId,
+              date,
+              description: `Chevauchement entre ${entry1.startTime}-${entry1.endTime} et ${entry2.startTime}-${entry2.endTime}`,
+              entries: [entry1.id, entry2.id]
+            });
+          }
+        }
+      }
+    }
+
+    return anomalies;
+  }
+
+  async submitTimeEntries(employeeId: number, weekStartDate: string): Promise<{
+    success: boolean;
+    submittedCount: number;
+    anomalies: any[];
+    message: string;
+  }> {
+    // Calculate week end date
+    const weekStart = new Date(weekStartDate);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    
+    const weekEndDate = weekEnd.toISOString().split('T')[0];
+
+    // Get all draft entries for the week
+    const entries = await this.getTimeEntries({
+      employeeId,
+      dateFrom: weekStartDate,
+      dateTo: weekEndDate,
+      status: 'draft',
+      limit: 100,
+      offset: 0
+    });
+
+    if (entries.data.length === 0) {
+      return {
+        success: false,
+        submittedCount: 0,
+        anomalies: [],
+        message: 'Aucune entrée de temps en brouillon trouvée pour cette semaine'
+      };
+    }
+
+    // Detect anomalies before submission
+    const anomalies = await this.detectTimeAnomalies(employeeId, weekStartDate, weekEndDate);
+
+    // Check for critical anomalies that prevent submission
+    const criticalAnomalies = anomalies.filter(a => a.severity === 'error');
+    if (criticalAnomalies.length > 0) {
+      return {
+        success: false,
+        submittedCount: 0,
+        anomalies,
+        message: `Impossible de soumettre: ${criticalAnomalies.length} anomalie(s) critique(s) détectée(s)`
+      };
+    }
+
+    // Update all entries to submitted status
+    await db
+      .update(timeEntries)
+      .set({ status: 'submitted', updated_at: new Date() })
+      .where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, weekStartDate),
+          lte(timeEntries.date, weekEndDate),
+          eq(timeEntries.status, 'draft')
+        )
+      );
+
+    return {
+      success: true,
+      submittedCount: entries.data.length,
+      anomalies,
+      message: `${entries.data.length} entrée(s) soumise(s) avec succès`
+    };
+  }
+
+  async getCurrentDayTimeEntries(employeeId: number): Promise<any[]> {
+    const today = new Date().toISOString().split('T')[0];
+    const result = await this.getTimeEntries({
+      employeeId,
+      dateFrom: today,
+      dateTo: today,
+      limit: 50,
+      offset: 0
+    });
+    return result.data;
+  }
+
+  async validateTimeEntryOverlap(
+    employeeId: number, 
+    date: string, 
+    startTime: string, 
+    endTime: string, 
+    excludeId?: number
+  ): Promise<{ valid: boolean; conflicts: string[] }> {
+    const existingEntries = await this.getTimeEntries({
+      employeeId,
+      dateFrom: date,
+      dateTo: date,
+      limit: 100,
+      offset: 0
+    });
+
+    const conflicts: string[] = [];
+    const newStart = new Date(`1970-01-01T${startTime}:00`);
+    const newEnd = new Date(`1970-01-01T${endTime}:00`);
+
+    for (const entry of existingEntries.data) {
+      if (excludeId && entry.id === excludeId) continue;
+      
+      const existingStart = new Date(`1970-01-01T${entry.startTime}:00`);
+      const existingEnd = new Date(`1970-01-01T${entry.endTime}:00`);
+      
+      if (newStart < existingEnd && newEnd > existingStart) {
+        conflicts.push(`Overlaps with entry ${entry.id} (${entry.startTime}-${entry.endTime})`);
+      }
+    }
+
+    return {
+      valid: conflicts.length === 0,
+      conflicts
+    };
+  }
+
+  // ========================================
   // PLANNING GENERATION
   // ========================================
 

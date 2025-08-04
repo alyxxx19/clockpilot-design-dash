@@ -362,6 +362,385 @@ export async function calculateWeeklyHours(
 // DÉTECTION DES CONFLITS D'HORAIRES
 // ============================================================================
 
+// ============================================================================
+// TIME ENTRIES BUSINESS LOGIC
+// ============================================================================
+
+export interface TimeAnomaly {
+  type: 'excessive_hours' | 'missing_break' | 'overlap' | 'unauthorized_overtime' | 'planning_mismatch';
+  severity: 'warning' | 'error';
+  employeeId: number;
+  date: string;
+  description: string;
+  suggestion: string;
+  data?: any;
+}
+
+export interface OvertimeCalculation {
+  employeeId: number;
+  period: string;
+  regularHours: number;
+  overtimeHours: number;
+  overtimeType: 'daily' | 'weekly' | 'monthly';
+  rate: number;
+  approved: boolean;
+}
+
+export async function calculateOvertime(
+  employeeId: number,
+  startDate: string,
+  endDate: string
+): Promise<OvertimeCalculation[]> {
+  const { storage } = await import('./storage');
+  
+  const entries = await storage.getTimeEntries({
+    employeeId,
+    dateFrom: startDate,
+    dateTo: endDate,
+    limit: 1000,
+    offset: 0
+  });
+
+  const calculations: OvertimeCalculation[] = [];
+  const dailyOvertimes: Record<string, number> = {};
+  
+  // Calculate daily overtime (over 8 hours)
+  entries.data.forEach(entry => {
+    const date = entry.date;
+    const totalHours = entry.totalHours || 0;
+    const dailyOvertime = Math.max(0, totalHours - 8);
+    
+    if (!dailyOvertimes[date]) dailyOvertimes[date] = 0;
+    dailyOvertimes[date] += dailyOvertime;
+    
+    if (dailyOvertime > 0) {
+      calculations.push({
+        employeeId,
+        period: date,
+        regularHours: Math.min(8, totalHours),
+        overtimeHours: dailyOvertime,
+        overtimeType: 'daily',
+        rate: 1.25, // 25% premium for daily overtime
+        approved: entry.isOvertime || false
+      });
+    }
+  });
+
+  // Calculate weekly overtime (over 35 hours average)
+  const weeklyHours: Record<string, number> = {};
+  entries.data.forEach(entry => {
+    const date = new Date(entry.date);
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay() + 1); // Monday
+    const weekKey = weekStart.toISOString().split('T')[0];
+    
+    if (!weeklyHours[weekKey]) weeklyHours[weekKey] = 0;
+    weeklyHours[weekKey] += entry.totalHours || 0;
+  });
+
+  Object.entries(weeklyHours).forEach(([weekStart, totalHours]) => {
+    const weeklyOvertime = Math.max(0, totalHours - 35);
+    if (weeklyOvertime > 0) {
+      calculations.push({
+        employeeId,
+        period: weekStart,
+        regularHours: Math.min(35, totalHours),
+        overtimeHours: weeklyOvertime,
+        overtimeType: 'weekly',
+        rate: 1.10, // 10% premium for weekly overtime
+        approved: false // Weekly overtime needs approval
+      });
+    }
+  });
+
+  return calculations;
+}
+
+export async function detectAnomalies(
+  employeeId: number,
+  startDate: string,
+  endDate: string
+): Promise<TimeAnomaly[]> {
+  const { storage } = await import('./storage');
+  
+  const entries = await storage.getTimeEntries({
+    employeeId,
+    dateFrom: startDate,
+    dateTo: endDate,
+    limit: 1000,
+    offset: 0
+  });
+
+  const anomalies: TimeAnomaly[] = [];
+
+  // Group by date
+  const dailyEntries: Record<string, any[]> = {};
+  entries.data.forEach(entry => {
+    if (!dailyEntries[entry.date]) dailyEntries[entry.date] = [];
+    dailyEntries[entry.date].push(entry);
+  });
+
+  // Detect various anomalies
+  for (const [date, dayEntries] of Object.entries(dailyEntries)) {
+    const totalDailyHours = dayEntries.reduce((sum, entry) => sum + (entry.totalHours || 0), 0);
+    
+    // Excessive daily hours (over 10h according to French law)
+    if (totalDailyHours > 10) {
+      anomalies.push({
+        type: 'excessive_hours',
+        severity: 'error',
+        employeeId,
+        date,
+        description: `Dépassement de 10h journalières: ${totalDailyHours.toFixed(2)}h`,
+        suggestion: 'Réduire les heures ou obtenir une autorisation exceptionnelle',
+        data: { actualHours: totalDailyHours, limit: 10 }
+      });
+    }
+
+    // Missing breaks for long work periods
+    for (const entry of dayEntries) {
+      const workHours = entry.totalHours || 0;
+      const breakMinutes = entry.breakDuration || 0;
+      
+      if (workHours > 6 && breakMinutes < 20) {
+        anomalies.push({
+          type: 'missing_break',
+          severity: 'warning',
+          employeeId,
+          date,
+          description: `Pause insuffisante pour ${workHours.toFixed(2)}h de travail (${breakMinutes}min)`,
+          suggestion: 'Ajouter au moins 20 minutes de pause pour les journées de plus de 6h',
+          data: { workHours, breakMinutes, requiredBreak: 20 }
+        });
+      }
+    }
+
+    // Overlapping time entries
+    for (let i = 0; i < dayEntries.length - 1; i++) {
+      for (let j = i + 1; j < dayEntries.length; j++) {
+        const entry1 = dayEntries[i];
+        const entry2 = dayEntries[j];
+        
+        const start1 = new Date(`1970-01-01T${entry1.startTime}:00`);
+        const end1 = new Date(`1970-01-01T${entry1.endTime}:00`);
+        const start2 = new Date(`1970-01-01T${entry2.startTime}:00`);
+        const end2 = new Date(`1970-01-01T${entry2.endTime}:00`);
+
+        if (start1 < end2 && end1 > start2) {
+          anomalies.push({
+            type: 'overlap',
+            severity: 'error',
+            employeeId,
+            date,
+            description: `Chevauchement entre ${entry1.startTime}-${entry1.endTime} et ${entry2.startTime}-${entry2.endTime}`,
+            suggestion: 'Ajuster les horaires pour éviter les chevauchements',
+            data: { entry1: entry1.id, entry2: entry2.id }
+          });
+        }
+      }
+    }
+
+    // Unauthorized overtime
+    const overtimeEntries = dayEntries.filter(entry => (entry.overtimeHours || 0) > 0);
+    for (const entry of overtimeEntries) {
+      if (!entry.isOvertime || !entry.overtimeReason) {
+        anomalies.push({
+          type: 'unauthorized_overtime',
+          severity: 'warning',
+          employeeId,
+          date,
+          description: `Heures supplémentaires non autorisées: ${entry.overtimeHours}h`,
+          suggestion: 'Justifier les heures supplémentaires ou obtenir une autorisation',
+          data: { entryId: entry.id, overtimeHours: entry.overtimeHours }
+        });
+      }
+    }
+  }
+
+  return anomalies;
+}
+
+export async function compareWithPlanning(
+  employeeId: number,
+  startDate: string,
+  endDate: string
+): Promise<{
+  employeeId: number;
+  period: string;
+  plannedHours: number;
+  actualHours: number;
+  variance: number;
+  variancePercent: number;
+  suggestions: string[];
+  details: Array<{
+    date: string;
+    plannedHours: number;
+    actualHours: number;
+    variance: number;
+    status: 'match' | 'under' | 'over';
+  }>;
+}> {
+  const { storage } = await import('./storage');
+  
+  // Get planning entries
+  const planningEntries = await storage.getPlanningEntries({
+    employeeId,
+    startDate,
+    endDate,
+    limit: 1000,
+    offset: 0
+  });
+
+  // Get time entries
+  const timeEntries = await storage.getTimeEntries({
+    employeeId,
+    dateFrom: startDate,
+    dateTo: endDate,
+    limit: 1000,
+    offset: 0
+  });
+
+  // Group by date
+  const planningByDate: Record<string, number> = {};
+  const actualByDate: Record<string, number> = {};
+
+  planningEntries.forEach(entry => {
+    if (entry.startTime && entry.endTime && entry.type === 'work') {
+      const start = new Date(`1970-01-01T${entry.startTime}:00`);
+      const end = new Date(`1970-01-01T${entry.endTime}:00`);
+      const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      planningByDate[entry.date] = (planningByDate[entry.date] || 0) + hours;
+    }
+  });
+
+  timeEntries.data.forEach(entry => {
+    actualByDate[entry.date] = (actualByDate[entry.date] || 0) + (entry.totalHours || 0);
+  });
+
+  // Calculate totals and variances
+  const totalPlanned = Object.values(planningByDate).reduce((sum, hours) => sum + hours, 0);
+  const totalActual = Object.values(actualByDate).reduce((sum, hours) => sum + hours, 0);
+  const totalVariance = totalActual - totalPlanned;
+  const variancePercent = totalPlanned > 0 ? (totalVariance / totalPlanned) * 100 : 0;
+
+  // Generate daily details
+  const allDates = new Set([...Object.keys(planningByDate), ...Object.keys(actualByDate)]);
+  const details = Array.from(allDates).map(date => {
+    const planned = planningByDate[date] || 0;
+    const actual = actualByDate[date] || 0;
+    const variance = actual - planned;
+    
+    let status: 'match' | 'under' | 'over' = 'match';
+    if (Math.abs(variance) > 0.5) { // 30 minutes tolerance
+      status = variance > 0 ? 'over' : 'under';
+    }
+
+    return { date, plannedHours: planned, actualHours: actual, variance, status };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Generate suggestions
+  const suggestions: string[] = [];
+  
+  if (Math.abs(variancePercent) > 10) {
+    if (variancePercent > 10) {
+      suggestions.push('Temps réalisé supérieur au planning (+' + variancePercent.toFixed(1) + '%)');
+      suggestions.push('Vérifier si des heures supplémentaires étaient justifiées');
+    } else {
+      suggestions.push('Temps réalisé inférieur au planning (' + variancePercent.toFixed(1) + '%)');
+      suggestions.push('Vérifier les absences ou temps non travaillé');
+    }
+  }
+
+  const overDays = details.filter(d => d.status === 'over').length;
+  const underDays = details.filter(d => d.status === 'under').length;
+
+  if (overDays > 0) {
+    suggestions.push(`${overDays} jour(s) avec dépassement d'horaires`);
+  }
+  if (underDays > 0) {
+    suggestions.push(`${underDays} jour(s) avec horaires insuffisants`);
+  }
+
+  return {
+    employeeId,
+    period: `${startDate} to ${endDate}`,
+    plannedHours: totalPlanned,
+    actualHours: totalActual,
+    variance: totalVariance,
+    variancePercent,
+    suggestions,
+    details
+  };
+}
+
+export async function validateTimeConsistency(
+  entries: Array<{
+    date: string;
+    startTime: string;
+    endTime: string;
+    breakDuration?: number;
+  }>
+): Promise<{
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  for (const entry of entries) {
+    const { date, startTime, endTime, breakDuration = 0 } = entry;
+
+    // Validate time format
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(startTime)) {
+      errors.push(`Format d'heure de début invalide: ${startTime}`);
+      continue;
+    }
+    if (!timeRegex.test(endTime)) {
+      errors.push(`Format d'heure de fin invalide: ${endTime}`);
+      continue;
+    }
+
+    // Validate time logic
+    const start = new Date(`1970-01-01T${startTime}:00`);
+    const end = new Date(`1970-01-01T${endTime}:00`);
+    
+    if (start >= end) {
+      errors.push(`Heure de fin doit être après l'heure de début (${startTime} - ${endTime})`);
+      continue;
+    }
+
+    // Calculate work duration
+    const totalMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+    const workMinutes = totalMinutes - breakDuration;
+    const workHours = workMinutes / 60;
+
+    // Check for excessive daily hours
+    if (workHours > 10) {
+      errors.push(`Dépassement de 10h journalières le ${date}: ${workHours.toFixed(2)}h`);
+    } else if (workHours > 8) {
+      warnings.push(`Plus de 8h de travail le ${date}: ${workHours.toFixed(2)}h (heures supplémentaires)`);
+    }
+
+    // Check for insufficient breaks
+    if (workHours > 6 && breakDuration < 20) {
+      warnings.push(`Pause insuffisante le ${date}: ${breakDuration}min pour ${workHours.toFixed(2)}h de travail`);
+    }
+
+    // Check for very long days
+    if (totalMinutes > 12 * 60) { // More than 12 hours including breaks
+      warnings.push(`Journée très longue le ${date}: ${(totalMinutes/60).toFixed(2)}h au total`);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
 export async function detectScheduleConflicts(
   employeeId?: number,
   startDate?: string,

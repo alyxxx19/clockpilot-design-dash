@@ -1472,21 +1472,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetEmployeeId = currentUserEmployee.id;
       }
 
-      const result = await storage.getTimeEntries(
-        targetEmployeeId,
-        date_from,
-        date_to,
+      const result = await storage.getTimeEntries({
+        employeeId: targetEmployeeId,
+        dateFrom: date_from,
+        dateTo: date_to,
         status,
-        page,
-        limit
-      );
+        limit: limit || 20,
+        offset: ((page || 1) - 1) * (limit || 20)
+      });
 
       // Group entries by specified period
       let groupedEntries = {};
       let totalsByCategory = {};
 
-      if (group_by && result.entries.length > 0) {
-        groupedEntries = result.entries.reduce((acc, entry) => {
+      if (group_by && result.data.length > 0) {
+        groupedEntries = result.data.reduce((acc, entry) => {
           let groupKey;
           const entryDate = new Date(entry.date);
           
@@ -1519,7 +1519,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }, {} as Record<string, any>);
 
         // Calculate totals by category
-        totalsByCategory = result.entries.reduce((acc, entry) => {
+        totalsByCategory = result.data.reduce((acc, entry) => {
           const category = entry.projectName || 'No Project';
           if (!acc[category]) {
             acc[category] = { hours: 0, entries: 0 };
@@ -1531,13 +1531,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json({
-        message: 'Time entries retrieved successfully',
-        data: {
-          ...result,
-          groupedBy: group_by,
-          groupedEntries,
-          totalsByCategory,
+        success: true,
+        data: result.data,
+        pagination: {
+          page: page || 1,
+          limit: limit || 20,
+          total: result.totals.count
         },
+        totals: result.totals,
+        anomalies: result.anomalies,
+        groupedBy: group_by,
+        groupedEntries,
+        totalsByCategory,
       });
     } catch (error) {
       console.error('Get time entries error:', error);
@@ -1721,8 +1726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isAdmin = req.user!.role === 'admin';
 
       // Get existing entry to check ownership and status
-      const { entries } = await storage.getTimeEntries();
-      const existingEntry = entries.find(e => e.id === entryId);
+      const existingEntry = await storage.getTimeEntry(entryId);
 
       if (!existingEntry) {
         return res.status(404).json({
@@ -1835,8 +1839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isAdmin = req.user!.role === 'admin';
 
       // Get existing entry to check ownership and status
-      const { entries } = await storage.getTimeEntries();
-      const existingEntry = entries.find(e => e.id === entryId);
+      const existingEntry = await storage.getTimeEntry(entryId);
 
       if (!existingEntry) {
         return res.status(404).json({
