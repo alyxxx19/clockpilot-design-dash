@@ -1,0 +1,285 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ========================
+  # Tests et Qualité Code
+  # ========================
+  test:
+    name: Tests et Linting
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: clockpilot_test
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: clockpilot_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint code
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npm run test:ci
+        env:
+          DATABASE_URL: postgresql://clockpilot_test:test_password@localhost:5432/clockpilot_test
+          JWT_SECRET: test-jwt-secret-key-for-ci
+          NODE_ENV: test
+
+      - name: Generate test coverage
+        run: npm run test:coverage
+        env:
+          DATABASE_URL: postgresql://clockpilot_test:test_password@localhost:5432/clockpilot_test
+          JWT_SECRET: test-jwt-secret-key-for-ci
+          NODE_ENV: test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: clockpilot-coverage
+
+  # ========================
+  # Build et Sécurité
+  # ========================
+  build:
+    name: Build et Scan Sécurité
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm audit --audit-level moderate
+
+      - name: Build application
+        run: npm run build
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: dist/
+          retention-days: 7
+
+  # ========================
+  # Build Image Docker
+  # ========================
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # ========================
+  # Déploiement Staging
+  # ========================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        run: |
+          echo "Déploiement vers l'environnement de staging"
+          # Ici vous pourriez utiliser des outils comme kubectl, terraform, etc.
+          
+      - name: Run health check
+        run: |
+          # Attendre que le déploiement soit effectif
+          sleep 30
+          
+          # Vérifier que l'application répond
+          curl -f https://staging-clockpilot.com/api/health || exit 1
+
+      - name: Notify team
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: 'Déploiement staging échoué pour ClockPilot'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ========================
+  # Déploiement Production
+  # ========================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create database backup
+        run: |
+          echo "Création d'une sauvegarde de production avant déploiement"
+          # Script de sauvegarde de la base de données
+          
+      - name: Deploy to production
+        run: |
+          echo "Déploiement vers l'environnement de production"
+          # Déploiement production avec zero-downtime
+          
+      - name: Run smoke tests
+        run: |
+          # Tests rapides pour vérifier le bon fonctionnement
+          curl -f https://clockpilot.com/api/health || exit 1
+          curl -f https://clockpilot.com/api/ready || exit 1
+
+      - name: Notify success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: 'ClockPilot déployé avec succès en production! 🚀'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: 'Déploiement production échoué pour ClockPilot ❌'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ========================
+  # Sauvegarde Quotidienne
+  # ========================
+  backup:
+    name: Daily Database Backup
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    schedule:
+      - cron: '0 2 * * *'  # Tous les jours à 2h du matin
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create backup
+        run: |
+          pg_dump ${{ secrets.DATABASE_URL }} > backup_$(date +%Y%m%d_%H%M%S).sql
+          
+      - name: Upload to S3
+        if: secrets.AWS_ACCESS_KEY_ID != ''
+        run: |
+          aws s3 cp backup_*.sql s3://${{ secrets.AWS_BACKUP_BUCKET }}/clockpilot/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      - name: Cleanup old backups
+        run: |
+          # Garder seulement les 30 dernières sauvegardes
+          aws s3 ls s3://${{ secrets.AWS_BACKUP_BUCKET }}/clockpilot/ | 
+          sort | head -n -30 | 
+          awk '{print $4}' | 
+          xargs -I {} aws s3 rm s3://${{ secrets.AWS_BACKUP_BUCKET }}/clockpilot/{}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
