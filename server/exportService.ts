@@ -1,441 +1,544 @@
-import * as XLSX from 'xlsx';
+import { Response } from 'express';
+import xlsx from 'xlsx';
 import puppeteer from 'puppeteer';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
+import { DatabaseStorage } from './storage';
 
 export interface ExportOptions {
   format: 'excel' | 'pdf';
-  dateRange?: {
-    start: string;
-    end: string;
-  };
-  employeeIds?: string[];
+  period?: 'week' | 'month' | 'year';
+  startDate?: string;
+  endDate?: string;
+  employeeIds?: number[];
+  projectIds?: number[];
+  includeStats?: boolean;
+  includeCharts?: boolean;
+}
+
+export interface CompanyInfo {
+  name: string;
+  logo?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  siret?: string;
 }
 
 export class ExportService {
+  private storage: DatabaseStorage;
   
-  // Export planning data
-  async exportPlanning(data: any[], options: ExportOptions): Promise<Buffer> {
-    if (options.format === 'excel') {
-      return this.exportPlanningToExcel(data);
-    } else {
-      return this.exportPlanningToPDF(data);
-    }
+  constructor(storage: DatabaseStorage) {
+    this.storage = storage;
   }
 
-  // Export time entries data
-  async exportTimeEntries(data: any[], options: ExportOptions): Promise<Buffer> {
-    if (options.format === 'excel') {
-      return this.exportTimeEntriesToExcel(data);
-    } else {
-      return this.exportTimeEntriesToPDF(data);
-    }
-  }
+  // ============================================================================
+  // PLANNING EXPORTS
+  // ============================================================================
 
-  // Export reports data
-  async exportReports(data: any[], options: ExportOptions): Promise<Buffer> {
-    if (options.format === 'excel') {
-      return this.exportReportsToExcel(data);
-    } else {
-      return this.exportReportsToPDF(data);
-    }
-  }
-
-  private async exportPlanningToExcel(data: any[]): Promise<Buffer> {
-    const workbook = XLSX.utils.book_new();
-
-    // Group data by employee
-    const groupedData = data.reduce((acc, entry) => {
-      const employeeName = `${entry.employee.firstName} ${entry.employee.lastName}`;
-      if (!acc[employeeName]) {
-        acc[employeeName] = [];
-      }
-      acc[employeeName].push(entry);
-      return acc;
-    }, {});
-
-    // Create a sheet for each employee
-    Object.entries(groupedData).forEach(([employeeName, entries]: [string, any]) => {
-      const sheetData = [
-        // Headers
-        ['Date', 'Heure début', 'Heure fin', 'Projet', 'Tâche', 'Statut', 'Heures planifiées'],
-        // Data rows
-        ...entries.map((entry: any) => [
-          format(new Date(entry.date), 'dd/MM/yyyy', { locale: fr }),
-          entry.startTime,
-          entry.endTime,
-          entry.project?.name || 'N/A',
-          entry.task?.title || entry.description || 'N/A',
-          entry.status,
-          entry.plannedHours
-        ])
-      ];
-
-      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-      
-      // Set column widths
-      worksheet['!cols'] = [
-        { width: 12 }, // Date
-        { width: 12 }, // Heure début
-        { width: 12 }, // Heure fin
-        { width: 20 }, // Projet
-        { width: 30 }, // Tâche
-        { width: 15 }, // Statut
-        { width: 15 }  // Heures planifiées
-      ];
-
-      // Add conditional formatting for status
-      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-      for (let row = 1; row <= range.e.r; row++) {
-        const statusCell = worksheet[XLSX.utils.encode_cell({ r: row, c: 5 })];
-        if (statusCell && statusCell.v) {
-          switch (statusCell.v) {
-            case 'validated':
-              statusCell.s = { fill: { fgColor: { rgb: 'D4E6F1' } } };
-              break;
-            case 'pending':
-              statusCell.s = { fill: { fgColor: { rgb: 'FCF3CF' } } };
-              break;
-            case 'draft':
-              statusCell.s = { fill: { fgColor: { rgb: 'FADBD8' } } };
-              break;
-          }
-        }
-      }
-
-      XLSX.utils.book_append_sheet(workbook, worksheet, employeeName.slice(0, 31));
+  async exportPlanning(options: ExportOptions, res: Response): Promise<void> {
+    const { format, period = 'week', startDate, endDate, employeeIds } = options;
+    
+    // Calculate date range
+    const dates = this.calculateDateRange(period, startDate, endDate);
+    
+    // Fetch planning data
+    const planningData = await this.fetchPlanningData({
+      dateFrom: dates.start,
+      dateTo: dates.end,
+      employeeIds
     });
 
-    // Add summary sheet
-    const summaryData = [
-      ['Résumé du planning'],
-      [''],
-      ['Employé', 'Heures planifiées', 'Nombre d\'entrées'],
-      ...Object.entries(groupedData).map(([employeeName, entries]: [string, any]) => [
-        employeeName,
-        entries.reduce((sum: number, entry: any) => sum + (entry.plannedHours || 0), 0),
-        entries.length
-      ])
-    ];
-
-    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-    summarySheet['!cols'] = [{ width: 25 }, { width: 18 }, { width: 18 }];
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Résumé');
-
-    return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+    if (format === 'excel') {
+      await this.exportPlanningExcel(planningData, dates, res);
+    } else {
+      await this.exportPlanningPDF(planningData, dates, res);
+    }
   }
 
-  private async exportTimeEntriesToExcel(data: any[]): Promise<Buffer> {
-    const workbook = XLSX.utils.book_new();
+  private async exportPlanningExcel(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string },
+    res: Response
+  ): Promise<void> {
+    const workbook = xlsx.utils.book_new();
+    
+    // Create summary sheet
+    const summaryData = this.preparePlanningSummary(data, dates);
+    const summarySheet = xlsx.utils.aoa_to_sheet(summaryData);
+    xlsx.utils.book_append_sheet(workbook, summarySheet, 'Résumé');
 
-    const sheetData = [
-      // Headers with company info
-      ['ClockPilot - Export des saisies de temps'],
-      [`Généré le ${format(new Date(), 'dd/MM/yyyy à HH:mm', { locale: fr })}`],
+    // Generate buffer and send
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="planning_${dates.start}_${dates.end}.xlsx"`);
+    res.send(buffer);
+  }
+
+  private async exportPlanningPDF(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string },
+    res: Response
+  ): Promise<void> {
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    
+    const html = this.generatePlanningHTML(data, dates);
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    
+    const pdf = await page.pdf({
+      format: 'A4',
+      margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
+      printBackground: true
+    });
+    
+    await browser.close();
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="planning_${dates.start}_${dates.end}.pdf"`);
+    res.send(pdf);
+  }
+
+  // ============================================================================
+  // TIME ENTRIES EXPORTS
+  // ============================================================================
+
+  async exportTimeEntries(options: ExportOptions, res: Response): Promise<void> {
+    const { format, startDate, endDate, employeeIds, projectIds } = options;
+    
+    const dates = this.calculateDateRange('month', startDate, endDate);
+    
+    const timeData = await this.fetchTimeEntriesData({
+      dateFrom: dates.start,
+      dateTo: dates.end,
+      employeeIds,
+      projectIds
+    });
+
+    if (format === 'excel') {
+      await this.exportTimeEntriesExcel(timeData, dates, res);
+    } else {
+      await this.exportTimeEntriesPDF(timeData, dates, res);
+    }
+  }
+
+  private async exportTimeEntriesExcel(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string },
+    res: Response
+  ): Promise<void> {
+    const workbook = xlsx.utils.book_new();
+    
+    // Payroll format sheet
+    const payrollData = this.preparePayrollData(data, dates);
+    const payrollSheet = xlsx.utils.aoa_to_sheet(payrollData);
+    xlsx.utils.book_append_sheet(workbook, payrollSheet, 'Paie');
+
+    // Summary sheet
+    const summaryData = this.prepareTimeEntriesSummary(data, dates);
+    const summarySheet = xlsx.utils.aoa_to_sheet(summaryData);
+    xlsx.utils.book_append_sheet(workbook, summarySheet, 'Synthèse');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="temps_${dates.start}_${dates.end}.xlsx"`);
+    res.send(buffer);
+  }
+
+  private async exportTimeEntriesPDF(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string },
+    res: Response
+  ): Promise<void> {
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    
+    const html = this.generateTimeEntriesHTML(data, dates);
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    
+    const pdf = await page.pdf({
+      format: 'A4',
+      margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
+      printBackground: true
+    });
+    
+    await browser.close();
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="temps_${dates.start}_${dates.end}.pdf"`);
+    res.send(pdf);
+  }
+
+  // ============================================================================
+  // MONTHLY REPORTS
+  // ============================================================================
+
+  async exportMonthlyReport(
+    employeeId: number, 
+    month: string, 
+    options: ExportOptions,
+    res: Response
+  ): Promise<void> {
+    const { format = 'pdf' } = options;
+    
+    const dates = this.calculateMonthRange(month);
+    const reportData = await this.fetchMonthlyReportData(employeeId, dates);
+
+    if (format === 'excel') {
+      await this.exportMonthlyReportExcel(reportData, res);
+    } else {
+      await this.exportMonthlyReportPDF(reportData, res);
+    }
+  }
+
+  private async exportMonthlyReportExcel(
+    data: {
+      employee: any,
+      timeEntries: any[],
+      planningEntries: any[],
+      projects: any[],
+      stats: any
+    },
+    res: Response
+  ): Promise<void> {
+    const workbook = xlsx.utils.book_new();
+    
+    const reportData = [
+      [`Rapport Mensuel - ${data.employee.first_name} ${data.employee.last_name}`],
+      [`Période: ${data.stats.month}`],
       [''],
-      ['Date', 'Employé', 'Heure début', 'Heure fin', 'Pause (min)', 'Heures travaillées', 'Heures sup.', 'Projet', 'Tâche', 'Statut'],
-      // Data rows
-      ...data.map((entry: any) => [
-        format(new Date(entry.date), 'dd/MM/yyyy', { locale: fr }),
-        `${entry.employee.firstName} ${entry.employee.lastName}`,
-        entry.startTime,
-        entry.endTime,
-        entry.breakDuration || 0,
-        entry.workedHours,
-        entry.overtimeHours || 0,
-        entry.project?.name || 'N/A',
-        entry.task?.title || entry.description || 'N/A',
+      ['Métriques', 'Valeur'],
+      ['Total Heures Travaillées', data.stats.totalHours.toFixed(1)],
+      ['Heures Supplémentaires', data.stats.overtimeHours.toFixed(1)],
+      ['Jours Travaillés', data.stats.workDays],
+      ['Projets', data.stats.projectCount]
+    ];
+
+    const reportSheet = xlsx.utils.aoa_to_sheet(reportData);
+    xlsx.utils.book_append_sheet(workbook, reportSheet, 'Rapport');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    
+    const fileName = `rapport_${data.employee.first_name}_${data.employee.last_name}_${data.stats.month}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(buffer);
+  }
+
+  private async exportMonthlyReportPDF(
+    data: {
+      employee: any,
+      timeEntries: any[],
+      planningEntries: any[],
+      projects: any[],
+      stats: any
+    },
+    res: Response
+  ): Promise<void> {
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    
+    const html = this.generateMonthlyReportHTML(data);
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    
+    const pdf = await page.pdf({
+      format: 'A4',
+      margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
+      printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate: this.getPDFHeader(),
+      footerTemplate: this.getPDFFooter()
+    });
+    
+    await browser.close();
+    
+    const fileName = `rapport_${data.employee.first_name}_${data.employee.last_name}_${data.stats.month}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(pdf);
+  }
+
+  // ============================================================================
+  // DATA PREPARATION METHODS
+  // ============================================================================
+
+  private async fetchPlanningData(filters: {
+    dateFrom: string,
+    dateTo: string,
+    employeeIds?: number[]
+  }) {
+    const entries = await this.storage.getPlanningEntries({
+      startDate: filters.dateFrom,
+      endDate: filters.dateTo,
+      employeeId: filters.employeeIds?.[0],
+      limit: 1000,
+      offset: 0
+    });
+
+    return {
+      entries,
+      employees: [],
+      projects: []
+    };
+  }
+
+  private async fetchTimeEntriesData(filters: {
+    dateFrom: string,
+    dateTo: string,
+    employeeIds?: number[],
+    projectIds?: number[]
+  }) {
+    const entries = await this.storage.getTimeEntries({
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      employeeId: filters.employeeIds?.[0],
+      projectId: filters.projectIds?.[0],
+      limit: 2000,
+      offset: 0
+    });
+
+    return {
+      entries: entries.data,
+      employees: [],
+      projects: []
+    };
+  }
+
+  private async fetchMonthlyReportData(employeeId: number, dates: { start: string, end: string }) {
+    const employee = await this.storage.getEmployee(employeeId);
+    if (!employee) throw new Error('Employee not found');
+
+    const timeEntries = await this.storage.getTimeEntries({
+      employeeId: employeeId,
+      dateFrom: dates.start,
+      dateTo: dates.end,
+      limit: 1000,
+      offset: 0
+    });
+
+    const planningEntries = await this.storage.getPlanningEntries({
+      employeeId: employeeId,
+      startDate: dates.start,
+      endDate: dates.end,
+      limit: 1000,
+      offset: 0
+    });
+
+    const stats = this.calculateMonthlyStats(timeEntries.data, planningEntries);
+
+    return {
+      employee,
+      timeEntries: timeEntries.data,
+      planningEntries: planningEntries,
+      projects: [],
+      stats
+    };
+  }
+
+  // ============================================================================
+  // FORMATTING METHODS
+  // ============================================================================
+
+  private preparePlanningSummary(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string }
+  ): any[][] {
+    const companyInfo = this.getCompanyInfo();
+    
+    return [
+      [`${companyInfo.name} - Planning Export`],
+      [`Période: ${dates.start} au ${dates.end}`],
+      [''],
+      ['Date', 'Employé', 'Début', 'Fin', 'Type', 'Statut'],
+      ...data.entries.map(entry => [
+        entry.date,
+        `Employé ${entry.employee_id}`,
+        entry.start_time || 'N/A',
+        entry.end_time || 'N/A',
+        entry.type,
         entry.status
       ])
     ];
+  }
 
-    // Add totals row
-    const totalWorkedHours = data.reduce((sum, entry) => sum + (entry.workedHours || 0), 0);
-    const totalOvertimeHours = data.reduce((sum, entry) => sum + (entry.overtimeHours || 0), 0);
+  private preparePayrollData(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string }
+  ): any[][] {
+    const companyInfo = this.getCompanyInfo();
     
-    sheetData.push(
+    const headers = [
+      [`${companyInfo.name} - Feuille de Paie`],
+      [`Période: ${dates.start} au ${dates.end}`],
       [''],
-      ['TOTAUX', '', '', '', '', totalWorkedHours, totalOvertimeHours, '', '', '']
-    );
-
-    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-    
-    // Set column widths
-    worksheet['!cols'] = [
-      { width: 12 }, // Date
-      { width: 20 }, // Employé
-      { width: 12 }, // Heure début
-      { width: 12 }, // Heure fin
-      { width: 12 }, // Pause
-      { width: 15 }, // Heures travaillées
-      { width: 12 }, // Heures sup.
-      { width: 20 }, // Projet
-      { width: 30 }, // Tâche
-      { width: 15 }  // Statut
+      ['Date', 'Employé', 'Début', 'Fin', 'Durée (h)', 'Type', 'Description']
     ];
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Saisies de temps');
+    const payrollRows = data.entries.map(entry => {
+      let duration = 0;
+      if (entry.start_time && entry.end_time) {
+        const start = new Date(`1970-01-01T${entry.start_time}:00`);
+        const end = new Date(`1970-01-01T${entry.end_time}:00`);
+        duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      }
 
-    return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+      return [
+        entry.date,
+        `Employé ${entry.employee_id}`,
+        entry.start_time || 'N/A',
+        entry.end_time || 'N/A',
+        duration.toFixed(1),
+        entry.type,
+        entry.description || ''
+      ];
+    });
+
+    return [...headers, ...payrollRows];
   }
 
-  private async exportReportsToExcel(data: any[]): Promise<Buffer> {
-    const workbook = XLSX.utils.book_new();
+  private prepareTimeEntriesSummary(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string }
+  ): any[][] {
+    const totalHours = data.entries.reduce((sum, entry) => {
+      if (!entry.start_time || !entry.end_time) return sum;
+      const start = new Date(`1970-01-01T${entry.start_time}:00`);
+      const end = new Date(`1970-01-01T${entry.end_time}:00`);
+      return sum + (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+    }, 0);
 
-    // Monthly report by employee
-    const monthlyData = [
-      ['Rapport mensuel - Employés'],
-      [`Période: ${format(new Date(), 'MMMM yyyy', { locale: fr })}`],
+    return [
+      ['Synthèse Générale'],
+      [`Période: ${dates.start} au ${dates.end}`],
       [''],
-      ['Employé', 'Heures planifiées', 'Heures réalisées', 'Heures sup.', 'Taux de réalisation', 'Jours travaillés'],
-      ...data.map((employee: any) => [
-        `${employee.firstName} ${employee.lastName}`,
-        employee.plannedHours || 0,
-        employee.workedHours || 0,
-        employee.overtimeHours || 0,
-        employee.workedHours > 0 ? `${Math.round((employee.workedHours / employee.plannedHours) * 100)}%` : '0%',
-        employee.workingDays || 0
-      ])
+      ['Métriques', 'Valeur'],
+      ['Total Heures Travaillées', totalHours.toFixed(1)],
+      ['Nombre d\'Entrées', data.entries.length]
     ];
-
-    const monthlySheet = XLSX.utils.aoa_to_sheet(monthlyData);
-    monthlySheet['!cols'] = [
-      { width: 25 }, // Employé
-      { width: 18 }, // Heures planifiées
-      { width: 18 }, // Heures réalisées
-      { width: 15 }, // Heures sup.
-      { width: 18 }, // Taux de réalisation
-      { width: 15 }  // Jours travaillés
-    ];
-
-    XLSX.utils.book_append_sheet(workbook, monthlySheet, 'Rapport mensuel');
-
-    // Payroll summary sheet
-    const payrollData = [
-      ['Synthèse pour la paie'],
-      [`Période: ${format(new Date(), 'MMMM yyyy', { locale: fr })}`],
-      [''],
-      ['N° employé', 'Nom', 'Prénom', 'Heures normales', 'Heures sup. 25%', 'Heures sup. 50%', 'Jours congés', 'Jours maladie'],
-      ...data.map((employee: any) => [
-        employee.employeeNumber || employee.id,
-        employee.lastName,
-        employee.firstName,
-        employee.regularHours || 0,
-        employee.overtime25 || 0,
-        employee.overtime50 || 0,
-        employee.vacationDays || 0,
-        employee.sickDays || 0
-      ])
-    ];
-
-    const payrollSheet = XLSX.utils.aoa_to_sheet(payrollData);
-    payrollSheet['!cols'] = [
-      { width: 15 }, // N° employé
-      { width: 20 }, // Nom
-      { width: 20 }, // Prénom
-      { width: 15 }, // Heures normales
-      { width: 15 }, // Heures sup. 25%
-      { width: 15 }, // Heures sup. 50%
-      { width: 15 }, // Jours congés
-      { width: 15 }  // Jours maladie
-    ];
-
-    XLSX.utils.book_append_sheet(workbook, payrollSheet, 'Synthèse paie');
-
-    return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
   }
 
-  private async exportPlanningToPDF(data: any[]): Promise<Buffer> {
-    const browser = await puppeteer.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    
-    try {
-      const page = await browser.newPage();
-      
-      const html = this.generatePlanningHTML(data);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      
-      const pdf = await page.pdf({
-        format: 'A4',
-        margin: {
-          top: '20mm',
-          right: '15mm',
-          bottom: '20mm',
-          left: '15mm'
-        }
-      });
+  // ============================================================================
+  // UTILITY METHODS
+  // ============================================================================
 
-      return Buffer.from(pdf);
-    } finally {
-      await browser.close();
+  private calculateDateRange(period: string, startDate?: string, endDate?: string): { start: string, end: string } {
+    if (startDate && endDate) {
+      return { start: startDate, end: endDate };
     }
-  }
 
-  private async exportTimeEntriesToPDF(data: any[]): Promise<Buffer> {
-    const browser = await puppeteer.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    
-    try {
-      const page = await browser.newPage();
-      
-      const html = this.generateTimeEntriesHTML(data);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      
-      const pdf = await page.pdf({
-        format: 'A4',
-        margin: {
-          top: '20mm',
-          right: '15mm',
-          bottom: '20mm',
-          left: '15mm'
-        }
-      });
+    const now = new Date();
+    let start: Date, end: Date;
 
-      return Buffer.from(pdf);
-    } finally {
-      await browser.close();
+    switch (period) {
+      case 'week':
+        start = new Date(now);
+        start.setDate(now.getDate() - now.getDay());
+        end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        break;
+      case 'month':
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        break;
+      case 'year':
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear(), 11, 31);
+        break;
+      default:
+        start = new Date(now);
+        end = new Date(now);
     }
+
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0]
+    };
   }
 
-  private async exportReportsToPDF(data: any[]): Promise<Buffer> {
-    const browser = await puppeteer.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+  private calculateMonthRange(month: string): { start: string, end: string } {
+    const [year, monthNum] = month.split('-').map(Number);
+    const start = new Date(year, monthNum - 1, 1);
+    const end = new Date(year, monthNum, 0);
+    
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0]
+    };
+  }
+
+  private calculateMonthlyStats(timeEntries: any[], planningEntries: any[]) {
+    let totalHours = 0;
+    let overtimeHours = 0;
+
+    timeEntries.forEach(entry => {
+      if (!entry.start_time || !entry.end_time) return;
+      const start = new Date(`1970-01-01T${entry.start_time}:00`);
+      const end = new Date(`1970-01-01T${entry.end_time}:00`);
+      const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      
+      totalHours += duration;
+      if (entry.type === 'overtime') {
+        overtimeHours += duration;
+      }
     });
-    
-    try {
-      const page = await browser.newPage();
-      
-      const html = this.generateReportsHTML(data);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      
-      const pdf = await page.pdf({
-        format: 'A4',
-        margin: {
-          top: '20mm',
-          right: '15mm',
-          bottom: '20mm',
-          left: '15mm'
-        }
-      });
 
-      return Buffer.from(pdf);
-    } finally {
-      await browser.close();
-    }
+    const workDays = new Set(timeEntries.map(e => e.date)).size;
+    const projectCount = new Set(timeEntries.map(e => e.project_id).filter(Boolean)).size;
+
+    return {
+      totalHours,
+      overtimeHours,
+      workDays,
+      projectCount,
+      month: timeEntries[0]?.date?.substring(0, 7) || ''
+    };
   }
 
-  private generatePlanningHTML(data: any[]): string {
-    const currentDate = format(new Date(), 'dd/MM/yyyy', { locale: fr });
-    
+  private getCompanyInfo(): CompanyInfo {
+    return {
+      name: 'ClockPilot Enterprise',
+      address: '123 Avenue des Entrepreneurs, 75001 Paris',
+      phone: '+33 1 23 45 67 89',
+      email: 'contact@clockpilot.fr',
+      siret: '12345678901234'
+    };
+  }
+
+  // ============================================================================
+  // HTML GENERATION FOR PDF
+  // ============================================================================
+
+  private generatePlanningHTML(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string }
+  ): string {
+    const companyInfo = this.getCompanyInfo();
+
     return `
     <!DOCTYPE html>
     <html>
     <head>
-      <meta charset="utf-8">
-      <title>Planning - ClockPilot</title>
+      <meta charset="UTF-8">
+      <title>Planning Export</title>
       <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .company-name { font-size: 24px; font-weight: bold; color: #2563eb; }
-        .report-title { font-size: 18px; margin: 10px 0; }
-        .report-date { font-size: 12px; color: #666; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        .status-validated { background-color: #d4f4dd; }
-        .status-pending { background-color: #fff3cd; }
-        .status-draft { background-color: #f8d7da; }
-        .footer { margin-top: 50px; font-size: 10px; color: #666; }
-        .signature { margin-top: 50px; }
-        .signature-line { border-top: 1px solid #333; width: 200px; margin-top: 30px; }
+        ${this.getPDFStyles()}
       </style>
     </head>
     <body>
       <div class="header">
-        <div class="company-name">ClockPilot</div>
-        <div class="report-title">Planning des équipes</div>
-        <div class="report-date">Généré le ${currentDate}</div>
+        <h1>${companyInfo.name}</h1>
+        <h2>Planning - ${dates.start} au ${dates.end}</h2>
       </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Employé</th>
-            <th>Heure début</th>
-            <th>Heure fin</th>
-            <th>Projet</th>
-            <th>Tâche</th>
-            <th>Statut</th>
-            <th>Heures</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(entry => `
-            <tr class="status-${entry.status}">
-              <td>${format(new Date(entry.date), 'dd/MM/yyyy', { locale: fr })}</td>
-              <td>${entry.employee.firstName} ${entry.employee.lastName}</td>
-              <td>${entry.startTime}</td>
-              <td>${entry.endTime}</td>
-              <td>${entry.project?.name || 'N/A'}</td>
-              <td>${entry.task?.title || entry.description || 'N/A'}</td>
-              <td>${entry.status}</td>
-              <td>${entry.plannedHours}h</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-
-      <div class="signature">
-        <p>Responsable planning :</p>
-        <div class="signature-line"></div>
-        <p>Date et signature</p>
-      </div>
-
-      <div class="footer">
-        <p>Document généré automatiquement par ClockPilot - ${currentDate}</p>
-        <p>Ce document contient des informations confidentielles. Toute reproduction ou diffusion est interdite sans autorisation.</p>
-      </div>
-    </body>
-    </html>`;
-  }
-
-  private generateTimeEntriesHTML(data: any[]): string {
-    const currentDate = format(new Date(), 'dd/MM/yyyy', { locale: fr });
-    const totalHours = data.reduce((sum, entry) => sum + (entry.workedHours || 0), 0);
-    const totalOvertime = data.reduce((sum, entry) => sum + (entry.overtimeHours || 0), 0);
-    
-    return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Saisie des temps - ClockPilot</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .company-name { font-size: 24px; font-weight: bold; color: #2563eb; }
-        .report-title { font-size: 18px; margin: 10px 0; }
-        .report-date { font-size: 12px; color: #666; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px; }
-        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        .totals { background-color: #e3f2fd; font-weight: bold; }
-        .footer { margin-top: 50px; font-size: 10px; color: #666; }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <div class="company-name">ClockPilot</div>
-        <div class="report-title">Relevé des temps de travail</div>
-        <div class="report-date">Généré le ${currentDate}</div>
-      </div>
-
+      
       <table>
         <thead>
           <tr>
@@ -443,135 +546,248 @@ export class ExportService {
             <th>Employé</th>
             <th>Début</th>
             <th>Fin</th>
-            <th>Pause (min)</th>
-            <th>H. travaillées</th>
-            <th>H. sup.</th>
-            <th>Projet</th>
+            <th>Type</th>
             <th>Statut</th>
           </tr>
         </thead>
         <tbody>
-          ${data.map(entry => `
-            <tr>
-              <td>${format(new Date(entry.date), 'dd/MM/yyyy', { locale: fr })}</td>
-              <td>${entry.employee.firstName} ${entry.employee.lastName}</td>
-              <td>${entry.startTime}</td>
-              <td>${entry.endTime}</td>
-              <td>${entry.breakDuration || 0}</td>
-              <td>${entry.workedHours}h</td>
-              <td>${entry.overtimeHours || 0}h</td>
-              <td>${entry.project?.name || 'N/A'}</td>
-              <td>${entry.status}</td>
-            </tr>
-          `).join('')}
-          <tr class="totals">
-            <td colspan="5">TOTAUX</td>
-            <td>${totalHours}h</td>
-            <td>${totalOvertime}h</td>
-            <td colspan="2"></td>
+          ${data.entries.map(entry => `
+          <tr>
+            <td>${entry.date}</td>
+            <td>Employé ${entry.employee_id}</td>
+            <td>${entry.start_time || 'N/A'}</td>
+            <td>${entry.end_time || 'N/A'}</td>
+            <td>${entry.type}</td>
+            <td>${entry.status}</td>
           </tr>
+          `).join('')}
         </tbody>
       </table>
-
-      <div class="footer">
-        <p>Document généré automatiquement par ClockPilot - ${currentDate}</p>
-        <p>Conformément au Code du travail français - Art. L3171-3</p>
-      </div>
     </body>
-    </html>`;
+    </html>
+    `;
   }
 
-  private generateReportsHTML(data: any[]): string {
-    const currentDate = format(new Date(), 'dd/MM/yyyy', { locale: fr });
-    const currentMonth = format(new Date(), 'MMMM yyyy', { locale: fr });
+  private generateTimeEntriesHTML(
+    data: { entries: any[], employees: any[], projects: any[] },
+    dates: { start: string, end: string }
+  ): string {
+    const companyInfo = this.getCompanyInfo();
     
     return `
     <!DOCTYPE html>
     <html>
     <head>
-      <meta charset="utf-8">
-      <title>Rapport mensuel - ClockPilot</title>
+      <meta charset="UTF-8">
+      <title>Rapport Temps</title>
       <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .company-name { font-size: 24px; font-weight: bold; color: #2563eb; }
-        .report-title { font-size: 18px; margin: 10px 0; }
-        .report-date { font-size: 12px; color: #666; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        .section-title { font-size: 16px; font-weight: bold; margin: 30px 0 10px 0; }
-        .footer { margin-top: 50px; font-size: 10px; color: #666; }
+        ${this.getPDFStyles()}
       </style>
     </head>
     <body>
       <div class="header">
-        <div class="company-name">ClockPilot</div>
-        <div class="report-title">Rapport mensuel des activités</div>
-        <div class="report-date">Période : ${currentMonth}</div>
+        <h1>${companyInfo.name}</h1>
+        <h2>Rapport de Temps - ${dates.start} au ${dates.end}</h2>
+      </div>
+      
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Employé</th>
+            <th>Début</th>
+            <th>Fin</th>
+            <th>Type</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.entries.map(entry => `
+          <tr>
+            <td>${entry.date}</td>
+            <td>Employé ${entry.employee_id}</td>
+            <td>${entry.start_time || 'N/A'}</td>
+            <td>${entry.end_time || 'N/A'}</td>
+            <td>${entry.type}</td>
+            <td>${entry.description || ''}</td>
+          </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </body>
+    </html>
+    `;
+  }
+
+  private generateMonthlyReportHTML(data: {
+    employee: any,
+    timeEntries: any[],
+    planningEntries: any[],
+    projects: any[],
+    stats: any
+  }): string {
+    const companyInfo = this.getCompanyInfo();
+    
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Rapport Mensuel</title>
+      <style>
+        ${this.getPDFStyles()}
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>${companyInfo.name}</h1>
+        <h2>Rapport Mensuel - ${data.employee.first_name} ${data.employee.last_name}</h2>
+        <p>Période: ${data.stats.month}</p>
+      </div>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h4>Heures Travaillées</h4>
+          <span class="stat-value">${data.stats.totalHours.toFixed(1)}h</span>
+        </div>
+        <div class="stat-card">
+          <h4>Heures Supplémentaires</h4>
+          <span class="stat-value">${data.stats.overtimeHours.toFixed(1)}h</span>
+        </div>
+        <div class="stat-card">
+          <h4>Jours Travaillés</h4>
+          <span class="stat-value">${data.stats.workDays}</span>
+        </div>
+        <div class="stat-card">
+          <h4>Projets</h4>
+          <span class="stat-value">${data.stats.projectCount}</span>
+        </div>
       </div>
 
-      <div class="section-title">Synthèse par employé</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Employé</th>
-            <th>H. planifiées</th>
-            <th>H. réalisées</th>
-            <th>H. supplémentaires</th>
-            <th>Taux de réalisation</th>
-            <th>Jours travaillés</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(employee => `
-            <tr>
-              <td>${employee.firstName} ${employee.lastName}</td>
-              <td>${employee.plannedHours || 0}h</td>
-              <td>${employee.workedHours || 0}h</td>
-              <td>${employee.overtimeHours || 0}h</td>
-              <td>${employee.workedHours > 0 ? Math.round((employee.workedHours / employee.plannedHours) * 100) : 0}%</td>
-              <td>${employee.workingDays || 0}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-
-      <div class="section-title">Données pour la paie</div>
-      <table>
-        <thead>
-          <tr>
-            <th>N° employé</th>
-            <th>Nom</th>
-            <th>Prénom</th>
-            <th>H. normales</th>
-            <th>H. sup. 25%</th>
-            <th>H. sup. 50%</th>
-            <th>Congés</th>
-            <th>Maladie</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(employee => `
-            <tr>
-              <td>${employee.employeeNumber || employee.id}</td>
-              <td>${employee.lastName}</td>
-              <td>${employee.firstName}</td>
-              <td>${employee.regularHours || 0}h</td>
-              <td>${employee.overtime25 || 0}h</td>
-              <td>${employee.overtime50 || 0}h</td>
-              <td>${employee.vacationDays || 0}</td>
-              <td>${employee.sickDays || 0}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-
-      <div class="footer">
-        <p>Document généré automatiquement par ClockPilot - ${currentDate}</p>
-        <p>Données conformes aux obligations légales de suivi du temps de travail</p>
+      <div class="signature-section">
+        <div class="signature-box">
+          <p>Signature Employé:</p>
+          <div class="signature-line"></div>
+        </div>
+        <div class="signature-box">
+          <p>Signature Manager:</p>
+          <div class="signature-line"></div>
+        </div>
       </div>
     </body>
-    </html>`;
+    </html>
+    `;
+  }
+
+  private getPDFStyles(): string {
+    return `
+      body { 
+        font-family: Arial, sans-serif; 
+        margin: 0; 
+        padding: 20px; 
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      
+      .header { 
+        text-align: center; 
+        margin-bottom: 30px; 
+        border-bottom: 2px solid #333;
+        padding-bottom: 20px;
+      }
+      
+      .header h1 { 
+        color: #333; 
+        margin: 0;
+        font-size: 24px;
+      }
+      
+      .header h2 { 
+        color: #666; 
+        margin: 10px 0 0 0;
+        font-size: 18px;
+      }
+      
+      table { 
+        width: 100%; 
+        border-collapse: collapse; 
+        margin-bottom: 20px;
+      }
+      
+      th, td { 
+        border: 1px solid #ddd; 
+        padding: 8px; 
+        text-align: left;
+      }
+      
+      th { 
+        background-color: #f2f2f2; 
+        font-weight: bold;
+      }
+      
+      tr:nth-child(even) { 
+        background-color: #f9f9f9; 
+      }
+      
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+        margin: 30px 0;
+      }
+      
+      .stat-card {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        text-align: center;
+        border: 1px solid #e9ecef;
+      }
+      
+      .stat-card h4 {
+        margin: 0 0 10px 0;
+        color: #495057;
+        font-size: 14px;
+      }
+      
+      .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #007bff;
+      }
+      
+      .signature-section {
+        margin-top: 60px;
+        display: flex;
+        justify-content: space-between;
+      }
+      
+      .signature-box {
+        width: 45%;
+      }
+      
+      .signature-line {
+        border-bottom: 1px solid #333;
+        margin-top: 30px;
+        height: 40px;
+      }
+    `;
+  }
+
+  private getPDFHeader(): string {
+    return `
+      <div style="font-size: 10px; padding: 10px; border-bottom: 1px solid #ddd;">
+        <span>ClockPilot Enterprise</span>
+        <span style="float: right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+      </div>
+    `;
+  }
+
+  private getPDFFooter(): string {
+    return `
+      <div style="font-size: 10px; padding: 10px; border-top: 1px solid #ddd; text-align: center;">
+        <span>Document généré le ${new Date().toLocaleDateString('fr-FR')} - ClockPilot Enterprise</span>
+      </div>
+    `;
   }
 }

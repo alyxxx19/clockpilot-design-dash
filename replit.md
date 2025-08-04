@@ -33,7 +33,7 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **Employee Management API**: Full CRUD operations for employees, with advanced filtering, pagination, and statistics.
 - **Planning API** (COMPLETED 2024-08-04): Complete 7-endpoint API implementation with automatic generation, conflict detection, bulk operations, validation workflow with notifications, and French labor law constraints integration.
 - **Time Entries API**: Real-time time tracking, overtime calculation, overlap validation, anomaly detection (e.g., missing breaks, unauthorized overtime), and planning vs. actual analysis.
-- **Advanced Filtering System**: Centralized `FilterBar` component and `useFilters` hook for consistent filtering, URL synchronization, and backend query parameter validation across all list views.
+- **Advanced QueryBuilder System** (ENHANCED 2025-01-04): Centralized QueryBuilder class with advanced filtering capabilities including full-text search, combinable filters, multi-column sorting, and optimized query performance across employees, planning entries, and time entries.
 - **Export Functionality**: Excel and PDF export options for filtered data.
 
 ## External Dependencies

@@ -28,7 +28,8 @@ import {
   type InsertNotification,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, sql, like, or, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, like, or, isNull, isNotNull, ilike, count, inArray } from "drizzle-orm";
+import { queryBuilder, FilterOptions, SortOptions, PaginationOptions } from "./queryBuilder";
 
 // ============================================================================
 // STORAGE INTERFACE - Define all CRUD operations needed by the application
@@ -301,74 +302,117 @@ export class DatabaseStorage implements IStorage {
       sortOrder?: string; 
     }
   ): Promise<{ employees: any[]; total: number; page: number; totalPages: number; }> {
-    const offset = (page - 1) * limit;
-    const isActive = filters?.status === 'active' ? true : filters?.status === 'inactive' ? false : undefined;
-    
-    // Build conditions array
-    const conditions = [];
-    
-    if (isActive !== undefined) {
-      conditions.push(eq(employees.is_active, isActive));
-    }
-    
-    if (filters?.department) {
-      conditions.push(eq(employees.department_id, filters.department));
-    }
+    // Map table columns for QueryBuilder
+    const tableColumns = {
+      id: employees.id,
+      first_name: employees.first_name,
+      last_name: employees.last_name,
+      employee_number: employees.employee_number,
+      department_id: employees.department_id,
+      manager_id: employees.manager_id,
+      hire_date: employees.hire_date,
+      contract_type: employees.contract_type,
+      weekly_hours: employees.weekly_hours,
+      is_active: employees.is_active,
+      phone: employees.phone,
+      email: users.email, // From joined users table
+      department_name: departments.name, // From joined departments table
+      created_at: employees.created_at,
+    };
 
-    if (filters?.contractType) {
-      conditions.push(eq(employees.contract_type, filters.contractType));
-    }
+    // Prepare advanced filter options
+    const filterOptions: FilterOptions = {
+      searchFields: ['first_name', 'last_name', 'employee_number', 'email'],
+      exactMatches: [],
+      dateRanges: [],
+      booleanFilters: [],
+    };
 
-    if (filters?.managerId) {
-      conditions.push(eq(employees.manager_id, filters.managerId));
-    }
-
-    if (filters?.hiredAfter) {
-      conditions.push(gte(employees.hire_date, filters.hiredAfter));
-    }
-
-    if (filters?.hiredBefore) {
-      conditions.push(lte(employees.hire_date, filters.hiredBefore));
-    }
-
-    if (filters?.minWeeklyHours !== undefined) {
-      conditions.push(gte(employees.weekly_hours, filters.minWeeklyHours));
-    }
-
-    if (filters?.maxWeeklyHours !== undefined) {
-      conditions.push(lte(employees.weekly_hours, filters.maxWeeklyHours));
-    }
-
-    if (filters?.hasEmail !== undefined) {
-      if (filters.hasEmail) {
-        conditions.push(isNotNull(users.email));
-      } else {
-        conditions.push(isNull(users.email));
-      }
-    }
-
-    if (filters?.hasPhone !== undefined) {
-      if (filters.hasPhone) {
-        conditions.push(isNotNull(employees.phone));
-      } else {
-        conditions.push(isNull(employees.phone));
-      }
-    }
-    
+    // Map filters to QueryBuilder format
     if (filters?.search) {
-      const searchTerm = `%${filters.search.toLowerCase()}%`;
-      conditions.push(
-        or(
-          like(employees.first_name, searchTerm),
-          like(employees.last_name, searchTerm),
-          like(users.email, searchTerm),
-          like(employees.employee_number, searchTerm)
-        )
-      );
+      filterOptions.search = filters.search;
     }
 
-    // Main query with joins
-    let query = db
+    // Status mapping (active/inactive -> boolean)
+    if (filters?.status) {
+      const isActive = filters.status === 'active' ? true : filters.status === 'inactive' ? false : undefined;
+      if (isActive !== undefined) {
+        filterOptions.booleanFilters!.push({ field: 'is_active', value: isActive });
+      }
+    }
+
+    // Exact match filters
+    if (filters?.department) {
+      filterOptions.exactMatches!.push({ field: 'department_id', value: filters.department });
+    }
+    if (filters?.contractType) {
+      filterOptions.exactMatches!.push({ field: 'contract_type', value: filters.contractType });
+    }
+    if (filters?.managerId) {
+      filterOptions.exactMatches!.push({ field: 'manager_id', value: filters.managerId });
+    }
+
+    // Date range filters
+    if (filters?.hiredAfter || filters?.hiredBefore) {
+      filterOptions.dateRanges!.push({
+        field: 'hire_date',
+        from: filters.hiredAfter,
+        to: filters.hiredBefore,
+      });
+    }
+
+    // Numeric range filters (weekly hours)
+    if (filters?.minWeeklyHours !== undefined || filters?.maxWeeklyHours !== undefined) {
+      if (filters.minWeeklyHours !== undefined) {
+        filterOptions.dateRanges!.push({
+          field: 'weekly_hours',
+          from: filters.minWeeklyHours.toString(),
+        });
+      }
+      if (filters.maxWeeklyHours !== undefined) {
+        filterOptions.dateRanges!.push({
+          field: 'weekly_hours',
+          to: filters.maxWeeklyHours.toString(),
+        });
+      }
+    }
+
+    // Boolean filters for email/phone presence
+    if (filters?.hasEmail !== undefined) {
+      filterOptions.booleanFilters!.push({ 
+        field: filters.hasEmail ? 'has_email' : 'no_email', 
+        value: filters.hasEmail 
+      });
+    }
+    if (filters?.hasPhone !== undefined) {
+      filterOptions.booleanFilters!.push({ 
+        field: filters.hasPhone ? 'has_phone' : 'no_phone', 
+        value: filters.hasPhone 
+      });
+    }
+
+    // Prepare sort options
+    const sortOptions: SortOptions = {
+      sortBy: filters?.sortBy || 'created_at',
+      sortOrder: (filters?.sortOrder as 'asc' | 'desc') || 'desc',
+    };
+
+    // Handle special sorting cases
+    if (filters?.sortBy === 'name') {
+      sortOptions.multiSort = [
+        { field: 'last_name', direction: sortOptions.sortOrder! },
+        { field: 'first_name', direction: sortOptions.sortOrder! }
+      ];
+      sortOptions.sortBy = undefined;
+    } else if (filters?.sortBy === 'department') {
+      sortOptions.sortBy = 'department_name';
+    }
+
+    // Prepare pagination options
+    const paginationOptions: PaginationOptions = { page, limit };
+
+    // Build base query with joins
+    let baseQuery = db
       .select({
         id: employees.id,
         userId: employees.user_id,
@@ -380,6 +424,7 @@ export class DatabaseStorage implements IStorage {
         hireDate: employees.hire_date,
         contractType: employees.contract_type,
         hourlyRate: employees.hourly_rate,
+        weeklyHours: employees.weekly_hours,
         vacationDaysTotal: employees.vacation_days_total,
         vacationDaysUsed: employees.vacation_days_used,
         isActive: employees.is_active,
@@ -395,48 +440,50 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(users, eq(employees.user_id, users.id))
       .leftJoin(departments, eq(employees.department_id, departments.id));
 
-    // Apply WHERE conditions
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+    // Apply filters using QueryBuilder
+    baseQuery = queryBuilder.applyFilters(baseQuery, filterOptions, tableColumns);
+
+    // Handle special boolean filters manually (hasEmail/hasPhone)
+    if (filters?.hasEmail !== undefined) {
+      baseQuery = baseQuery.where(
+        filters.hasEmail ? isNotNull(users.email) : isNull(users.email)
+      ) as typeof baseQuery;
+    }
+    if (filters?.hasPhone !== undefined) {
+      baseQuery = baseQuery.where(
+        filters.hasPhone ? isNotNull(employees.phone) : isNull(employees.phone)
+      ) as typeof baseQuery;
     }
 
-    // Apply ORDER BY
-    const sortDirection = filters?.sortOrder === 'asc' ? asc : desc;
-    switch (filters?.sortBy) {
-      case 'name':
-        query = query.orderBy(sortDirection(employees.last_name), sortDirection(employees.first_name));
-        break;
-      case 'hire_date':
-        query = query.orderBy(sortDirection(employees.hire_date));
-        break;
-      case 'department':
-        query = query.orderBy(sortDirection(departments.name));
-        break;
-      case 'contract_type':
-        query = query.orderBy(sortDirection(employees.contract_type));
-        break;
-      case 'weekly_hours':
-        query = query.orderBy(sortDirection(employees.weekly_hours));
-        break;
-      default:
-        query = query.orderBy(sortDirection(employees.created_at));
-    }
+    // Apply sorting using QueryBuilder
+    baseQuery = queryBuilder.applySort(baseQuery, sortOptions, tableColumns);
 
-    // Apply pagination
-    query = query.limit(limit).offset(offset);
+    // Apply pagination using QueryBuilder
+    const query = queryBuilder.applyPagination(baseQuery, paginationOptions);
 
-    // Count query
+    // Build count query
     let countQuery = db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: count() })
       .from(employees)
       .leftJoin(users, eq(employees.user_id, users.id))
       .leftJoin(departments, eq(employees.department_id, departments.id));
+
+    // Apply same filters to count query
+    countQuery = queryBuilder.applyFilters(countQuery, filterOptions, tableColumns);
     
-    if (conditions.length > 0) {
-      countQuery = countQuery.where(and(...conditions));
+    // Handle special boolean filters for count query
+    if (filters?.hasEmail !== undefined) {
+      countQuery = countQuery.where(
+        filters.hasEmail ? isNotNull(users.email) : isNull(users.email)
+      ) as typeof countQuery;
+    }
+    if (filters?.hasPhone !== undefined) {
+      countQuery = countQuery.where(
+        filters.hasPhone ? isNotNull(employees.phone) : isNull(employees.phone)
+      ) as typeof countQuery;
     }
 
-    // Execute both queries
+    // Execute both queries in parallel
     const [employeesResult, countResult] = await Promise.all([
       query,
       countQuery
@@ -746,32 +793,108 @@ export class DatabaseStorage implements IStorage {
       projectId?: number;
       status?: string;
       type?: string;
+      category?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: string;
       limit?: number;
       offset?: number;
+      page?: number;
     }
-  ): Promise<any[]> {
-    const conditions = [];
+  ): Promise<{ data: any[]; total: number; page: number; totalPages: number; }> {
+    // Map table columns for QueryBuilder
+    const tableColumns = {
+      id: timeEntries.id,
+      employee_id: timeEntries.employee_id,
+      project_id: timeEntries.project_id,
+      date: timeEntries.date,
+      start_time: timeEntries.start_time,
+      end_time: timeEntries.end_time,
+      type: timeEntries.type,
+      category: timeEntries.category,
+      description: timeEntries.description,
+      status: timeEntries.status,
+      validated_by: timeEntries.validated_by,
+      validated_at: timeEntries.validated_at,
+      created_at: timeEntries.created_at,
+      updated_at: timeEntries.updated_at,
+      // From joined tables
+      employee_first_name: employees.first_name,
+      employee_last_name: employees.last_name,
+      employee_number: employees.employee_number,
+      project_name: projects.name,
+      project_client: projects.client_name,
+    };
 
-    if (filters.startDate) {
-      conditions.push(gte(timeEntries.date, filters.startDate));
-    }
-    if (filters.endDate) {
-      conditions.push(lte(timeEntries.date, filters.endDate));
-    }
-    if (filters.employeeId) {
-      conditions.push(eq(timeEntries.employee_id, filters.employeeId));
-    }
-    if (filters.projectId) {
-      conditions.push(eq(timeEntries.project_id, filters.projectId));
-    }
-    if (filters.status) {
-      conditions.push(eq(timeEntries.status, filters.status));
-    }
-    if (filters.type) {
-      conditions.push(eq(timeEntries.type, filters.type));
+    // Prepare advanced filter options
+    const filterOptions: FilterOptions = {
+      searchFields: ['employee_first_name', 'employee_last_name', 'employee_number', 'project_name', 'description'],
+      exactMatches: [],
+      dateRanges: [],
+      booleanFilters: [],
+    };
+
+    // Map filters to QueryBuilder format
+    if (filters?.search) {
+      filterOptions.search = filters.search;
     }
 
-    let query = db
+    // Exact match filters
+    if (filters?.employeeId) {
+      filterOptions.exactMatches!.push({ field: 'employee_id', value: filters.employeeId });
+    }
+    if (filters?.projectId) {
+      filterOptions.exactMatches!.push({ field: 'project_id', value: filters.projectId });
+    }
+    if (filters?.status) {
+      filterOptions.exactMatches!.push({ field: 'status', value: filters.status });
+    }
+    if (filters?.type) {
+      filterOptions.exactMatches!.push({ field: 'type', value: filters.type });
+    }
+    if (filters?.category) {
+      filterOptions.exactMatches!.push({ field: 'category', value: filters.category });
+    }
+
+    // Date range filters
+    if (filters?.startDate || filters?.endDate) {
+      filterOptions.dateRanges!.push({
+        field: 'date',
+        from: filters.startDate,
+        to: filters.endDate,
+      });
+    }
+
+    // Prepare sort options
+    const sortOptions: SortOptions = {
+      sortBy: filters?.sortBy || 'date',
+      sortOrder: (filters?.sortOrder as 'asc' | 'desc') || 'desc',
+    };
+
+    // Handle special sorting cases
+    if (filters?.sortBy === 'employee') {
+      sortOptions.multiSort = [
+        { field: 'employee_last_name', direction: sortOptions.sortOrder! },
+        { field: 'employee_first_name', direction: sortOptions.sortOrder! }
+      ];
+      sortOptions.sortBy = undefined;
+    } else if (filters?.sortBy === 'project') {
+      sortOptions.sortBy = 'project_name';
+    } else if (filters?.sortBy === 'time') {
+      sortOptions.multiSort = [
+        { field: 'date', direction: sortOptions.sortOrder! },
+        { field: 'start_time', direction: sortOptions.sortOrder! }
+      ];
+      sortOptions.sortBy = undefined;
+    }
+
+    // Prepare pagination options
+    const limit = filters?.limit || 20;
+    const page = filters?.page || Math.floor((filters?.offset || 0) / limit) + 1;
+    const paginationOptions: PaginationOptions = { page, limit };
+
+    // Build base query with joins
+    let baseQuery = db
       .select({
         id: timeEntries.id,
         employeeId: timeEntries.employee_id,
@@ -783,6 +906,7 @@ export class DatabaseStorage implements IStorage {
         category: timeEntries.category,
         description: timeEntries.description,
         status: timeEntries.status,
+        breakDuration: timeEntries.break_duration,
         locationLatitude: timeEntries.location_latitude,
         locationLongitude: timeEntries.location_longitude,
         locationAddress: timeEntries.location_address,
@@ -802,20 +926,40 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(employees, eq(timeEntries.employee_id, employees.id))
       .leftJoin(projects, eq(timeEntries.project_id, projects.id));
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
+    // Apply filters using QueryBuilder
+    baseQuery = queryBuilder.applyFilters(baseQuery, filterOptions, tableColumns);
 
-    query = query.orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
+    // Apply sorting using QueryBuilder
+    baseQuery = queryBuilder.applySort(baseQuery, sortOptions, tableColumns);
 
-    if (filters.limit) {
-      query = query.limit(filters.limit);
-    }
-    if (filters.offset) {
-      query = query.offset(filters.offset);
-    }
+    // Apply pagination using QueryBuilder
+    const query = queryBuilder.applyPagination(baseQuery, paginationOptions);
 
-    return await query;
+    // Build count query
+    let countQuery = db
+      .select({ count: count() })
+      .from(timeEntries)
+      .leftJoin(employees, eq(timeEntries.employee_id, employees.id))
+      .leftJoin(projects, eq(timeEntries.project_id, projects.id));
+
+    // Apply same filters to count query
+    countQuery = queryBuilder.applyFilters(countQuery, filterOptions, tableColumns);
+
+    // Execute both queries in parallel
+    const [timeEntriesResult, countResult] = await Promise.all([
+      query,
+      countQuery
+    ]);
+
+    const total = countResult[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: timeEntriesResult,
+      total,
+      page,
+      totalPages,
+    };
   }
 
   // ========================================
@@ -870,28 +1014,94 @@ export class DatabaseStorage implements IStorage {
     departmentId?: number;
     status?: string;
     type?: string;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: string;
     limit?: number;
     offset?: number;
-  }): Promise<any[]> {
-    const conditions = [];
+    page?: number;
+  }): Promise<{ data: any[]; total: number; page: number; totalPages: number; }> {
+    // Map table columns for QueryBuilder
+    const tableColumns = {
+      id: planningEntries.id,
+      employee_id: planningEntries.employee_id,
+      date: planningEntries.date,
+      type: planningEntries.type,
+      start_time: planningEntries.start_time,
+      end_time: planningEntries.end_time,
+      status: planningEntries.status,
+      validated_by: planningEntries.validated_by,
+      validated_at: planningEntries.validated_at,
+      created_at: planningEntries.created_at,
+      updated_at: planningEntries.updated_at,
+      // From joined tables
+      employee_first_name: employees.first_name,
+      employee_last_name: employees.last_name,
+      employee_number: employees.employee_number,
+      department_id: employees.department_id,
+      department_name: departments.name,
+    };
 
-    if (filters.startDate) {
-      conditions.push(gte(planningEntries.date, filters.startDate));
-    }
-    if (filters.endDate) {
-      conditions.push(lte(planningEntries.date, filters.endDate));
-    }
-    if (filters.employeeId) {
-      conditions.push(eq(planningEntries.employee_id, filters.employeeId));
-    }
-    if (filters.status) {
-      conditions.push(eq(planningEntries.status, filters.status));
-    }
-    if (filters.type) {
-      conditions.push(eq(planningEntries.type, filters.type));
+    // Prepare advanced filter options
+    const filterOptions: FilterOptions = {
+      searchFields: ['employee_first_name', 'employee_last_name', 'employee_number'],
+      exactMatches: [],
+      dateRanges: [],
+      booleanFilters: [],
+    };
+
+    // Map filters to QueryBuilder format
+    if (filters?.search) {
+      filterOptions.search = filters.search;
     }
 
-    let query = db
+    // Exact match filters
+    if (filters?.employeeId) {
+      filterOptions.exactMatches!.push({ field: 'employee_id', value: filters.employeeId });
+    }
+    if (filters?.departmentId) {
+      filterOptions.exactMatches!.push({ field: 'department_id', value: filters.departmentId });
+    }
+    if (filters?.status) {
+      filterOptions.exactMatches!.push({ field: 'status', value: filters.status });
+    }
+    if (filters?.type) {
+      filterOptions.exactMatches!.push({ field: 'type', value: filters.type });
+    }
+
+    // Date range filters
+    if (filters?.startDate || filters?.endDate) {
+      filterOptions.dateRanges!.push({
+        field: 'date',
+        from: filters.startDate,
+        to: filters.endDate,
+      });
+    }
+
+    // Prepare sort options
+    const sortOptions: SortOptions = {
+      sortBy: filters?.sortBy || 'date',
+      sortOrder: (filters?.sortOrder as 'asc' | 'desc') || 'asc',
+    };
+
+    // Handle special sorting cases
+    if (filters?.sortBy === 'employee') {
+      sortOptions.multiSort = [
+        { field: 'employee_last_name', direction: sortOptions.sortOrder! },
+        { field: 'employee_first_name', direction: sortOptions.sortOrder! }
+      ];
+      sortOptions.sortBy = undefined;
+    } else if (filters?.sortBy === 'department') {
+      sortOptions.sortBy = 'department_name';
+    }
+
+    // Prepare pagination options
+    const limit = filters?.limit || 20;
+    const page = filters?.page || Math.floor((filters?.offset || 0) / limit) + 1;
+    const paginationOptions: PaginationOptions = { page, limit };
+
+    // Build base query with joins
+    let baseQuery = db
       .select({
         id: planningEntries.id,
         employeeId: planningEntries.employee_id,
@@ -917,24 +1127,40 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(employees, eq(planningEntries.employee_id, employees.id))
       .leftJoin(departments, eq(employees.department_id, departments.id));
 
-    if (filters.departmentId) {
-      conditions.push(eq(employees.department_id, filters.departmentId));
-    }
+    // Apply filters using QueryBuilder
+    baseQuery = queryBuilder.applyFilters(baseQuery, filterOptions, tableColumns);
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
+    // Apply sorting using QueryBuilder
+    baseQuery = queryBuilder.applySort(baseQuery, sortOptions, tableColumns);
 
-    query = query.orderBy(asc(planningEntries.date), asc(planningEntries.start_time));
+    // Apply pagination using QueryBuilder
+    const query = queryBuilder.applyPagination(baseQuery, paginationOptions);
 
-    if (filters.limit) {
-      query = query.limit(filters.limit);
-    }
-    if (filters.offset) {
-      query = query.offset(filters.offset);
-    }
+    // Build count query
+    let countQuery = db
+      .select({ count: count() })
+      .from(planningEntries)
+      .leftJoin(employees, eq(planningEntries.employee_id, employees.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id));
 
-    return await query;
+    // Apply same filters to count query
+    countQuery = queryBuilder.applyFilters(countQuery, filterOptions, tableColumns);
+
+    // Execute both queries in parallel
+    const [planningResult, countResult] = await Promise.all([
+      query,
+      countQuery
+    ]);
+
+    const total = countResult[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: planningResult,
+      total,
+      page,
+      totalPages,
+    };
   }
 
   async getPlanningEntriesGroupedByDay(filters: {

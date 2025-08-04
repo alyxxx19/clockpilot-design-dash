@@ -1374,13 +1374,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Utiliser la nouvelle implémentation de détection des conflits
-      const planningData = await storage.getPlanningEntries({
+      const planningResult = await storage.getPlanningEntries({
         startDate: start_date as string,
         endDate: end_date as string,
         employeeId: targetEmployeeId,
         limit: 1000,
-        offset: 0
+        page: 1
       });
+      const planningData = planningResult.data;
 
       const conflicts: any[] = [];
       
@@ -1472,13 +1473,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetEmployeeId = currentUserEmployee.id;
       }
 
-      const result = await storage.getTimeEntries({
+      const result = await storage.getTimeEntriesWithFilters({
         employeeId: targetEmployeeId,
-        dateFrom: date_from,
-        dateTo: date_to,
+        startDate: date_from,
+        endDate: date_to,
         status,
+        search: req.query.search as string,
+        sortBy: req.query.sortBy as string,
+        sortOrder: req.query.sortOrder as string,
         limit: limit || 20,
-        offset: ((page || 1) - 1) * (limit || 20)
+        page: page || 1
       });
 
       // Group entries by specified period
@@ -1532,17 +1536,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         success: true,
-        data: result.data,
+        message: 'Time entries retrieved successfully',
+        data: group_by ? groupedEntries : result.data,
         pagination: {
-          page: page || 1,
+          page: result.page,
           limit: limit || 20,
-          total: result.totals.count
+          total: result.total,
+          totalPages: result.totalPages,
+          hasNext: result.page < result.totalPages,
+          hasPrev: result.page > 1,
         },
-        totals: result.totals,
-        anomalies: result.anomalies,
         groupedBy: group_by,
-        groupedEntries,
-        totalsByCategory,
+        groupedEntries: group_by ? groupedEntries : undefined,
+        totalsByCategory: group_by ? totalsByCategory : undefined,
       });
     } catch (error) {
       console.error('Get time entries error:', error);
@@ -2669,9 +2675,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
-  // EXPORT ROUTES
+  // EXPORT ROUTES (Legacy - see line 3336+ for updated version)
   // ========================================
-  const exportService = new ExportService();
 
   // Export planning data
   app.get('/api/planning/export', authenticateToken, authorizeRole(['admin', 'employee']), async (req: AuthRequest, res: Response) => {
@@ -2860,18 +2865,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         departmentId,
         status,
         type,
+        search,
+        sortBy,
+        sortOrder,
         groupBy,
-        limit = 50,
-        offset = 0
+        limit = 20,
+        offset = 0,
+        page
       } = req.query;
 
       // Validation des paramètres
       if (!startDate || !endDate) {
         return res.status(400).json({ 
-          error: 'Les paramètres startDate et endDate sont requis' 
+          error: 'Les paramètres startDate et endDate sont requis',
+          code: 'MISSING_DATE_PARAMS'
         });
       }
 
+      // Prepare filters for QueryBuilder integration
       const filters = {
         startDate,
         endDate,
@@ -2879,27 +2890,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
         departmentId: departmentId ? parseInt(departmentId) : undefined,
         status,
         type,
+        search,
+        sortBy,
+        sortOrder,
         limit: parseInt(limit),
-        offset: parseInt(offset)
+        offset: parseInt(offset),
+        page: page ? parseInt(page) : Math.floor(parseInt(offset) / parseInt(limit)) + 1
       };
 
-      let result;
+      // Use the improved QueryBuilder-based method
+      const result = await storage.getPlanningEntries(filters);
+
+      // Group by day if requested (post-processing)
+      let responseData = result.data;
       if (groupBy === 'day') {
-        // Pour l'instant, utiliser la même fonction jusqu'à ce que getPlanningEntriesGroupedByDay soit implémentée
-        result = await storage.getPlanningEntries(filters);
-      } else {
-        result = await storage.getPlanningEntries(filters);
+        const groupedByDay: Record<string, any[]> = {};
+        result.data.forEach(entry => {
+          const date = entry.date;
+          if (!groupedByDay[date]) {
+            groupedByDay[date] = [];
+          }
+          groupedByDay[date].push(entry);
+        });
+        responseData = groupedByDay;
       }
 
       res.json({
         success: true,
-        data: result,
-        filters: filters
+        message: 'Planning retrieved successfully',
+        data: responseData,
+        pagination: {
+          page: result.page,
+          limit: parseInt(limit),
+          total: result.total,
+          totalPages: result.totalPages,
+          hasNext: result.page < result.totalPages,
+          hasPrev: result.page > 1,
+        },
+        filters: {
+          ...filters,
+          applied: Object.keys(filters).filter(key => 
+            filters[key] !== undefined && filters[key] !== null && filters[key] !== ''
+          )
+        }
       });
 
     } catch (error) {
       console.error('Planning fetch error:', error);
-      res.status(500).json({ error: 'Erreur lors de la récupération du planning' });
+      res.status(500).json({ 
+        error: 'Erreur lors de la récupération du planning',
+        code: 'PLANNING_FETCH_ERROR'
+      });
     }
   });
 
@@ -3288,6 +3329,241 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Conflict detection error:', error);
       res.status(500).json({ error: 'Erreur lors de la détection des conflits' });
+    }
+  });
+
+  // ========================================
+  // EXPORT ROUTES
+  // ========================================
+  
+  // Initialize Export Service
+  const exportServiceInstance = new ExportService(storage);
+
+  // GET /api/planning/export - Export planning data
+  app.get('/api/planning/export', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const { format = 'excel', period = 'week', startDate, endDate, employeeIds } = req.query;
+      
+      // Parse employeeIds if provided
+      let parsedEmployeeIds: number[] | undefined;
+      if (employeeIds) {
+        parsedEmployeeIds = Array.isArray(employeeIds) 
+          ? employeeIds.map(id => parseInt(id as string)).filter(id => !isNaN(id))
+          : [parseInt(employeeIds as string)].filter(id => !isNaN(id));
+      }
+      
+      // Validate format
+      if (!['excel', 'pdf'].includes(format as string)) {
+        return res.status(400).json({
+          error: 'Invalid format. Must be excel or pdf',
+          code: 'INVALID_FORMAT'
+        });
+      }
+
+      // Permission check: non-admin can only export their own data
+      if (req.user!.role !== 'admin') {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        parsedEmployeeIds = [currentUserEmployee.id];
+      }
+
+      await exportServiceInstance.exportPlanning({
+        format: format as 'excel' | 'pdf',
+        period: period as string,
+        startDate: startDate as string,
+        endDate: endDate as string,
+        employeeIds: parsedEmployeeIds
+      }, res);
+
+    } catch (error) {
+      console.error('Planning export error:', error);
+      res.status(500).json({
+        error: 'Failed to export planning data',
+        code: 'EXPORT_PLANNING_ERROR'
+      });
+    }
+  });
+
+  // GET /api/time-entries/export - Export time entries data
+  app.get('/api/time-entries/export', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const { format = 'excel', startDate, endDate, employeeIds, projectIds } = req.query;
+      
+      // Parse IDs if provided
+      let parsedEmployeeIds: number[] | undefined;
+      if (employeeIds) {
+        parsedEmployeeIds = Array.isArray(employeeIds) 
+          ? employeeIds.map(id => parseInt(id as string)).filter(id => !isNaN(id))
+          : [parseInt(employeeIds as string)].filter(id => !isNaN(id));
+      }
+
+      let parsedProjectIds: number[] | undefined;
+      if (projectIds) {
+        parsedProjectIds = Array.isArray(projectIds) 
+          ? projectIds.map(id => parseInt(id as string)).filter(id => !isNaN(id))
+          : [parseInt(projectIds as string)].filter(id => !isNaN(id));
+      }
+      
+      // Validate format
+      if (!['excel', 'pdf'].includes(format as string)) {
+        return res.status(400).json({
+          error: 'Invalid format. Must be excel or pdf',
+          code: 'INVALID_FORMAT'
+        });
+      }
+
+      // Permission check: non-admin can only export their own data
+      if (req.user!.role !== 'admin') {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee) {
+          return res.status(403).json({
+            error: 'Employee profile not found',
+            code: 'EMPLOYEE_NOT_FOUND'
+          });
+        }
+        parsedEmployeeIds = [currentUserEmployee.id];
+      }
+
+      await exportServiceInstance.exportTimeEntries({
+        format: format as 'excel' | 'pdf',
+        startDate: startDate as string,
+        endDate: endDate as string,
+        employeeIds: parsedEmployeeIds,
+        projectIds: parsedProjectIds
+      }, res);
+
+    } catch (error) {
+      console.error('Time entries export error:', error);
+      res.status(500).json({
+        error: 'Failed to export time entries data',
+        code: 'EXPORT_TIME_ENTRIES_ERROR'
+      });
+    }
+  });
+
+  // GET /api/reports/monthly/:employee_id - Export monthly report for specific employee
+  app.get('/api/reports/monthly/:employee_id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.employee_id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_EMPLOYEE_ID'
+        });
+      }
+
+      const { format = 'pdf', month } = req.query;
+      
+      // Validate format
+      if (!['excel', 'pdf'].includes(format as string)) {
+        return res.status(400).json({
+          error: 'Invalid format. Must be excel or pdf',
+          code: 'INVALID_FORMAT'
+        });
+      }
+
+      // Validate month format (YYYY-MM)
+      const monthRegex = /^\d{4}-\d{2}$/;
+      if (!month || !monthRegex.test(month as string)) {
+        return res.status(400).json({
+          error: 'Invalid month format. Must be YYYY-MM',
+          code: 'INVALID_MONTH_FORMAT'
+        });
+      }
+
+      // Permission check: non-admin can only export their own report
+      if (req.user!.role !== 'admin') {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only export own reports',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      // Verify employee exists
+      const employee = await storage.getEmployee(employeeId);
+      if (!employee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      await exportServiceInstance.exportMonthlyReport(
+        employeeId,
+        month as string,
+        { format: format as 'excel' | 'pdf' },
+        res
+      );
+
+    } catch (error) {
+      console.error('Monthly report export error:', error);
+      res.status(500).json({
+        error: 'Failed to export monthly report',
+        code: 'EXPORT_MONTHLY_REPORT_ERROR'
+      });
+    }
+  });
+
+  // GET /api/reports/export-options - Get available export options and formats
+  app.get('/api/reports/export-options', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const isAdmin = req.user!.role === 'admin';
+      let currentEmployee = null;
+      
+      if (!isAdmin) {
+        currentEmployee = await storage.getEmployeeByUserId(req.user!.id);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          formats: ['excel', 'pdf'],
+          periods: ['week', 'month', 'year'],
+          exportTypes: [
+            {
+              id: 'planning',
+              name: 'Planning Export',
+              description: 'Export planning entries with employee schedules',
+              endpoint: '/api/planning/export',
+              availableFormats: ['excel', 'pdf']
+            },
+            {
+              id: 'time-entries',
+              name: 'Time Entries Export',
+              description: 'Export time tracking data for payroll and analysis',
+              endpoint: '/api/time-entries/export',
+              availableFormats: ['excel', 'pdf']
+            },
+            {
+              id: 'monthly-report',
+              name: 'Monthly Report',
+              description: 'Comprehensive monthly report for individual employees',
+              endpoint: '/api/reports/monthly/:employee_id',
+              availableFormats: ['excel', 'pdf']
+            }
+          ],
+          userPermissions: {
+            isAdmin,
+            canExportAllEmployees: isAdmin,
+            ownEmployeeId: currentEmployee?.id || null
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Export options error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch export options',
+        code: 'EXPORT_OPTIONS_ERROR'
+      });
     }
   });
 
