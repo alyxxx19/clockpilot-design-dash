@@ -1,0 +1,13 @@
+# Playwright test artifacts
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Auth state files
+.auth/
+
+# Screenshots and videos
+screenshots/
+videos/
+traces/

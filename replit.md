@@ -59,3 +59,19 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **Zod**: For schema validation.
 - **xlsx**: Library for Excel exports.
 - **Puppeteer**: For PDF exports.
+
+## Production Configuration & Deployment (2025-01-04)
+- **Environment Management**: Complete .env.example with 60+ production variables, automated generation script with secure secret creation, validation script with comprehensive checks
+- **Deployment Infrastructure**: Enhanced deploy.sh script with SSL certificate monitoring, database migration automation, cache warming, health checks, Slack notifications
+- **Development Tools**: docker-compose.override.yml for local development with additional services (MailHog, pgAdmin, Redis Commander), separate environment isolation
+- **Documentation**: Comprehensive DEPLOYMENT.md guide with multiple deployment methods (Docker, PM2, systemd), security hardening, monitoring setup, backup procedures
+- **Security & Monitoring**: SSL certificate validation, automated backup scripts, health check monitoring, performance optimization configurations
+
+## E2E Testing Suite with Playwright (2025-01-04)
+- **Comprehensive Test Coverage**: Complete Playwright E2E testing suite with 4 main test files covering authentication, employee workflows, admin workflows, and offline functionality
+- **Authentication Tests**: Login/logout flows for employee/admin roles, session expiry, invalid credentials, form validation, redirect handling, "remember me" functionality
+- **Employee Workflow Tests**: Dashboard navigation, planning consultation, time tracking (punch in/out), manual time entries, task management, profile updates, notifications
+- **Admin Workflow Tests**: Employee CRUD operations, planning generation, time validation/approval/rejection, Excel/PDF exports, department/project management, compliance checks
+- **Offline Mode Tests**: Network status detection, action queuing, synchronization, error handling, data persistence, cache management, intermittent connectivity
+- **CI/CD Integration**: GitHub Actions workflow with multi-browser testing (Chrome, Firefox, Safari), mobile viewports, performance testing, artifact uploads
+- **Test Infrastructure**: Authentication setup, test utilities/helpers, fixture data, comprehensive documentation, debugging tools, screenshot/video capture
