@@ -149,6 +149,10 @@ export default function TimeTracking() {
   // Fetch current active time entry
   const { data: currentEntry, isLoading: currentLoading } = useQuery<TimeEntry>({
     queryKey: ['/api/time-entries/current'],
+    queryFn: async () => {
+      const response = await apiRequest('/api/time-entries/current');
+      return response.data;
+    },
     retry: false,
     enabled: isOnline
   });
@@ -156,6 +160,10 @@ export default function TimeTracking() {
   // Fetch today's time entries
   const { data: todayEntries = [], isLoading: todayLoading } = useQuery<TimeEntry[]>({
     queryKey: ['/api/time-entries/today'],
+    queryFn: async () => {
+      const response = await apiRequest('/api/time-entries/today');
+      return response.data;
+    },
     retry: false,
     enabled: isOnline
   });
