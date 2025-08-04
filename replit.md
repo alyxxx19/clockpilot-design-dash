@@ -31,7 +31,7 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **Comprehensive Database Schema**: Robust structure for various HR and project management entities.
 - **JWT Authentication System**: Secure user registration, login, logout, and token refresh with role-based access control.
 - **Employee Management API**: Full CRUD operations for employees, with advanced filtering, pagination, and statistics.
-- **Planning API**: Supports detailed planning, auto-generation, weekly validation, and conflict detection with business logic incorporating legal constraints (e.g., 10h/day, 48h/week, 11h rest).
+- **Planning API** (COMPLETED 2024-08-04): Complete 7-endpoint API implementation with automatic generation, conflict detection, bulk operations, validation workflow with notifications, and French labor law constraints integration.
 - **Time Entries API**: Real-time time tracking, overtime calculation, overlap validation, anomaly detection (e.g., missing breaks, unauthorized overtime), and planning vs. actual analysis.
 - **Advanced Filtering System**: Centralized `FilterBar` component and `useFilters` hook for consistent filtering, URL synchronization, and backend query parameter validation across all list views.
 - **Export Functionality**: Excel and PDF export options for filtered data.

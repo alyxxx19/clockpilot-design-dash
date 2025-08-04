@@ -844,6 +844,367 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return notification || undefined;
   }
+
+  // ========================================
+  // PLANNING OPERATIONS
+  // ========================================
+  
+  async getPlanningEntries(filters: {
+    startDate?: string;
+    endDate?: string;
+    employeeId?: number;
+    departmentId?: number;
+    status?: string;
+    type?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]> {
+    const conditions = [];
+
+    if (filters.startDate) {
+      conditions.push(gte(planningEntries.date, filters.startDate));
+    }
+    if (filters.endDate) {
+      conditions.push(lte(planningEntries.date, filters.endDate));
+    }
+    if (filters.employeeId) {
+      conditions.push(eq(planningEntries.employee_id, filters.employeeId));
+    }
+    if (filters.status) {
+      conditions.push(eq(planningEntries.status, filters.status));
+    }
+    if (filters.type) {
+      conditions.push(eq(planningEntries.type, filters.type));
+    }
+
+    let query = db
+      .select({
+        id: planningEntries.id,
+        employeeId: planningEntries.employee_id,
+        date: planningEntries.date,
+        type: planningEntries.type,
+        startTime: planningEntries.start_time,
+        endTime: planningEntries.end_time,
+        status: planningEntries.status,
+        validatedBy: planningEntries.validated_by,
+        validatedAt: planningEntries.validated_at,
+        comments: planningEntries.comments,
+        rejectionReason: planningEntries.rejection_reason,
+        createdAt: planningEntries.created_at,
+        updatedAt: planningEntries.updated_at,
+        // Employee info
+        employeeFirstName: employees.first_name,
+        employeeLastName: employees.last_name,
+        employeeNumber: employees.employee_number,
+        // Department info
+        departmentName: departments.name,
+      })
+      .from(planningEntries)
+      .leftJoin(employees, eq(planningEntries.employee_id, employees.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id));
+
+    if (filters.departmentId) {
+      conditions.push(eq(employees.department_id, filters.departmentId));
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    query = query.orderBy(asc(planningEntries.date), asc(planningEntries.start_time));
+
+    if (filters.limit) {
+      query = query.limit(filters.limit);
+    }
+    if (filters.offset) {
+      query = query.offset(filters.offset);
+    }
+
+    return await query;
+  }
+
+  async getPlanningEntriesGroupedByDay(filters: {
+    startDate: string;
+    endDate: string;
+    employeeId?: number;
+    departmentId?: number;
+  }): Promise<any> {
+    const entries = await this.getPlanningEntries(filters);
+    
+    // Grouper par jour et calculer les totaux
+    const groupedByDay = entries.reduce((acc, entry) => {
+      const dateKey = entry.date;
+      if (!acc[dateKey]) {
+        acc[dateKey] = {
+          date: dateKey,
+          entries: [],
+          totalPlannedHours: 0,
+          workEntries: 0,
+          leaveEntries: 0,
+          validationStatus: 'pending'
+        };
+      }
+      
+      acc[dateKey].entries.push(entry);
+      
+      if (entry.type === 'work' && entry.startTime && entry.endTime) {
+        const start = new Date(`1970-01-01T${entry.startTime}:00`);
+        const end = new Date(`1970-01-01T${entry.endTime}:00`);
+        const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+        acc[dateKey].totalPlannedHours += hours;
+        acc[dateKey].workEntries++;
+      } else if (entry.type !== 'work') {
+        acc[dateKey].leaveEntries++;
+      }
+      
+      // Déterminer le statut de validation (prendre le plus restrictif)
+      if (entry.status === 'rejected') {
+        acc[dateKey].validationStatus = 'rejected';
+      } else if (entry.status === 'validated' && acc[dateKey].validationStatus !== 'rejected') {
+        acc[dateKey].validationStatus = 'validated';
+      }
+      
+      return acc;
+    }, {} as Record<string, any>);
+
+    return Object.values(groupedByDay).sort((a: any, b: any) => a.date.localeCompare(b.date));
+  }
+
+  async getEmployeeWeeklyPlanning(employeeId: number, weekStart: string): Promise<any> {
+    // Calculer la fin de semaine
+    const weekStartDate = new Date(weekStart);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekEndDate.getDate() + 6);
+    const weekEnd = weekEndDate.toISOString().split('T')[0];
+
+    // Récupérer les entrées de planning
+    const planningEntries = await this.getPlanningEntries({
+      startDate: weekStart,
+      endDate: weekEnd,
+      employeeId
+    });
+
+    // Récupérer les temps réalisés pour comparaison
+    const timeEntries = await db
+      .select({
+        id: timeEntries.id,
+        date: timeEntries.date,
+        startTime: timeEntries.start_time,
+        endTime: timeEntries.end_time,
+        status: timeEntries.status,
+        actualHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600`,
+      })
+      .from(timeEntries)
+      .where(
+        and(
+          eq(timeEntries.employee_id, employeeId),
+          gte(timeEntries.date, weekStart),
+          lte(timeEntries.date, weekEnd)
+        )
+      )
+      .orderBy(asc(timeEntries.date), asc(timeEntries.start_time));
+
+    // Récupérer le statut de validation
+    const [validation] = await db
+      .select()
+      .from(validations)
+      .where(
+        and(
+          eq(validations.employee_id, employeeId),
+          eq(validations.week_start_date_date, weekStart)
+        )
+      );
+
+    // Calculer les totaux
+    let plannedHours = 0;
+    let actualHours = 0;
+
+    planningEntries.forEach(entry => {
+      if (entry.type === 'work' && entry.startTime && entry.endTime) {
+        const start = new Date(`1970-01-01T${entry.startTime}:00`);
+        const end = new Date(`1970-01-01T${entry.endTime}:00`);
+        plannedHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+      }
+    });
+
+    timeEntries.forEach(entry => {
+      actualHours += entry.actualHours || 0;
+    });
+
+    return {
+      employeeId,
+      weekStart,
+      weekEnd,
+      planningEntries,
+      timeEntries,
+      validation,
+      summary: {
+        plannedHours: Math.round(plannedHours * 100) / 100,
+        actualHours: Math.round(actualHours * 100) / 100,
+        variance: Math.round((actualHours - plannedHours) * 100) / 100,
+        validationStatus: validation?.status || 'pending',
+      },
+    };
+  }
+
+  async createPlanningEntry(entry: InsertPlanningEntry): Promise<PlanningEntry> {
+    const [newEntry] = await db
+      .insert(planningEntries)
+      .values(entry)
+      .returning();
+    return newEntry;
+  }
+
+  async updatePlanningEntry(id: number, entry: Partial<InsertPlanningEntry>): Promise<PlanningEntry | undefined> {
+    const [updatedEntry] = await db
+      .update(planningEntries)
+      .set({ ...entry, updated_at: new Date() })
+      .where(eq(planningEntries.id, id))
+      .returning();
+    return updatedEntry || undefined;
+  }
+
+  async deletePlanningEntry(id: number): Promise<boolean> {
+    const result = await db
+      .delete(planningEntries)
+      .where(eq(planningEntries.id, id));
+    return result.rowCount > 0;
+  }
+
+  async bulkCreatePlanningEntries(entries: InsertPlanningEntry[]): Promise<PlanningEntry[]> {
+    const newEntries = await db
+      .insert(planningEntries)
+      .values(entries)
+      .returning();
+    return newEntries;
+  }
+
+  async bulkUpdatePlanningEntries(updates: { id: number; data: Partial<InsertPlanningEntry> }[]): Promise<PlanningEntry[]> {
+    const results = [];
+    
+    for (const update of updates) {
+      const result = await this.updatePlanningEntry(update.id, update.data);
+      if (result) {
+        results.push(result);
+      }
+    }
+    
+    return results;
+  }
+
+  // ========================================
+  // PLANNING VALIDATION
+  // ========================================
+
+  async createValidation(validation: InsertValidation): Promise<Validation> {
+    const [newValidation] = await db
+      .insert(validations)
+      .values(validation)
+      .returning();
+    return newValidation;
+  }
+
+  async getValidationByEmployeeAndWeek(employeeId: number, weekStart: string): Promise<Validation | undefined> {
+    const [validation] = await db
+      .select()
+      .from(validations)
+      .where(
+        and(
+          eq(validations.employee_id, employeeId),
+          eq(validations.week_start_date_date, weekStart)
+        )
+      );
+    return validation || undefined;
+  }
+
+  async updateValidation(id: number, data: Partial<InsertValidation>): Promise<Validation | undefined> {
+    const [updatedValidation] = await db
+      .update(validations)
+      .set({ ...data, updated_at: new Date() })
+      .where(eq(validations.id, id))
+      .returning();
+    return updatedValidation || undefined;
+  }
+
+  // ========================================
+  // PLANNING GENERATION
+  // ========================================
+
+  async generatePlanning(params: {
+    employeeIds: number[];
+    startDate: string;
+    endDate: string;
+    templateId?: number;
+    respectConstraints?: boolean;
+  }): Promise<{
+    generatedEntries: PlanningEntry[];
+    conflicts: any[];
+    warnings: string[];
+  }> {
+    const { employeeIds, startDate, endDate, respectConstraints = true } = params;
+    const generatedEntries: PlanningEntry[] = [];
+    const conflicts: any[] = [];
+    const warnings: string[] = [];
+
+    // Logique de génération simple (peut être étendue)
+    for (const employeeId of employeeIds) {
+      // Récupérer les informations de l'employé
+      const employee = await this.getEmployee(employeeId);
+      if (!employee || !employee.is_active) {
+        warnings.push(`Employé ${employeeId} non trouvé ou inactif`);
+        continue;
+      }
+
+      // Générer des créneaux par défaut (8h par jour, 5 jours par semaine)
+      const currentDate = new Date(startDate);
+      const endDateObj = new Date(endDate);
+
+      while (currentDate <= endDateObj) {
+        const dayOfWeek = currentDate.getDay();
+        
+        // Lundi à vendredi seulement
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          const dateStr = currentDate.toISOString().split('T')[0];
+          
+          const entry = {
+            employee_id: employeeId,
+            date: dateStr,
+            type: 'work' as const,
+            start_time: '09:00',
+            end_time: '17:00',
+            status: 'draft' as const,
+            created_at: new Date(),
+            updated_at: new Date(),
+          };
+
+          // Vérifier les contraintes si demandé
+          if (respectConstraints) {
+            const { valid, conflicts: entryConflicts } = await import('./businessLogic').then(bl => 
+              bl.checkLegalConstraints(employeeId, dateStr, '09:00', '17:00')
+            );
+            
+            if (!valid) {
+              conflicts.push(...entryConflicts);
+            } else {
+              const createdEntry = await this.createPlanningEntry(entry);
+              generatedEntries.push(createdEntry);
+            }
+          } else {
+            const createdEntry = await this.createPlanningEntry(entry);
+            generatedEntries.push(createdEntry);
+          }
+        }
+
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    }
+
+    return {
+      generatedEntries,
+      conflicts,
+      warnings
+    };
+  }
 }
 
 // ============================================================================

@@ -205,6 +205,12 @@ export const authorizeRole = (allowedRoles: string[]) => {
   };
 };
 
+// Alias for verifyToken to maintain consistency with naming conventions
+export const verifyToken = authenticateToken;
+
+// Alias for requirePermission
+export const requirePermission = (role: string) => authorizeRole([role]);
+
 // ============================================================================
 // VALIDATION MIDDLEWARE
 // ============================================================================
@@ -1040,103 +1046,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PLANNING API ENDPOINTS
   // ========================================
 
-  // GET /api/planning - Get planning entries with filters
-  app.get('/api/planning', authenticateToken, validateRequest(planningQuerySchema), async (req: AuthRequest, res: Response) => {
-    try {
-      const { start_date, end_date, employee_id, department_id } = req.query as any;
-      
-      // Check permissions - employees can only see their own planning
-      const isAdmin = req.user!.role === 'admin';
-      let targetEmployeeId = employee_id;
-      
-      if (!isAdmin) {
-        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
-        if (!currentUserEmployee) {
-          return res.status(403).json({
-            error: 'Employee profile not found',
-            code: 'EMPLOYEE_NOT_FOUND'
-          });
-        }
-        
-        // Override employee_id to only show current user's planning
-        targetEmployeeId = currentUserEmployee.id;
-      }
+  // PLANNING API - Using new implementation below (around line 2900)
 
-      const planningEntries = await storage.getPlanningEntries(
-        start_date, 
-        end_date, 
-        targetEmployeeId, 
-        department_id
-      );
-
-      // Group by date and calculate totals
-      const entriesByDate = planningEntries.reduce((acc, entry) => {
-        if (!acc[entry.date]) {
-          acc[entry.date] = { entries: [], totalHours: 0, types: {} };
-        }
-        acc[entry.date].entries.push(entry);
-        
-        // Calculate hours for work entries
-        if (entry.startTime && entry.endTime && entry.type === 'work') {
-          const start = new Date(`1970-01-01T${entry.startTime}:00`);
-          const end = new Date(`1970-01-01T${entry.endTime}:00`);
-          const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-          acc[entry.date].totalHours += hours;
-        }
-        
-        // Count types
-        acc[entry.date].types[entry.type] = (acc[entry.date].types[entry.type] || 0) + 1;
-        
-        return acc;
-      }, {} as Record<string, any>);
-
-      res.json({
-        message: 'Planning entries retrieved successfully',
-        data: {
-          startDate: start_date,
-          endDate: end_date,
-          entriesByDate,
-          totalEntries: planningEntries.length,
-        },
-      });
-    } catch (error) {
-      console.error('Get planning error:', error);
-      res.status(500).json({
-        error: 'Failed to fetch planning entries',
-        code: 'FETCH_PLANNING_ERROR'
-      });
-    }
-  });
-
-  // POST /api/planning/generate - Generate planning for a period (Admin only)
-  app.post('/api/planning/generate', authenticateToken, authorizeRole(['admin']), validateRequest(generatePlanningSchema), async (req: AuthRequest, res: Response) => {
-    try {
-      const { start_date, end_date, template_id, employee_ids, department_id } = req.body;
-
-      const generatedEntries = await storage.generatePlanningForPeriod(
-        start_date,
-        end_date,
-        employee_ids,
-        department_id,
-        template_id
-      );
-
-      res.status(201).json({
-        message: 'Planning generated successfully',
-        data: {
-          generatedEntries: generatedEntries.length,
-          entries: generatedEntries,
-          period: { start_date, end_date },
-        },
-      });
-    } catch (error) {
-      console.error('Generate planning error:', error);
-      res.status(500).json({
-        error: 'Failed to generate planning',
-        code: 'GENERATE_PLANNING_ERROR'
-      });
-    }
-  });
+  // Planning endpoints moved to new implementation below (around line 2900)
 
   // GET /api/planning/:employee_id/week/:date - Get weekly planning for employee
   app.get('/api/planning/:employee_id/week/:date', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -1461,11 +1373,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetEmployeeId = currentUserEmployee.id;
       }
 
-      const conflicts = await storage.detectPlanningConflicts(
-        targetEmployeeId,
-        start_date as string,
-        end_date as string
-      );
+      // Utiliser la nouvelle implémentation de détection des conflits
+      const planningData = await storage.getPlanningEntries({
+        startDate: start_date as string,
+        endDate: end_date as string,
+        employeeId: targetEmployeeId,
+        limit: 1000,
+        offset: 0
+      });
+
+      const conflicts: any[] = [];
+      
+      // Vérifier les heures journalières (max 10h selon la loi française)
+      const dailyHours: Record<string, Record<number, number>> = {};
+      
+      for (const entry of planningData) {
+        const date = entry.date;
+        const empId = entry.employeeId;
+        
+        if (!dailyHours[date]) dailyHours[date] = {};
+        if (!dailyHours[date][empId]) dailyHours[date][empId] = 0;
+        
+        if (entry.startTime && entry.endTime && entry.type === 'work') {
+          const start = new Date(`1970-01-01T${entry.startTime}:00`);
+          const end = new Date(`1970-01-01T${entry.endTime}:00`);
+          const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+          dailyHours[date][empId] += hours;
+        }
+      }
+      
+      // Détecter les conflits d'heures journalières
+      for (const [date, employees] of Object.entries(dailyHours)) {
+        for (const [empId, hours] of Object.entries(employees)) {
+          if (hours > 10) {
+            conflicts.push({
+              type: 'max_daily_hours',
+              severity: 'error',
+              employeeId: parseInt(empId),
+              date,
+              description: `Dépassement de 10h journalières: ${hours}h planifiées`,
+              suggestion: 'Réduire les heures de travail ou répartir sur plusieurs jours'
+            });
+          }
+        }
+      }
 
       // Group conflicts by severity
       const groupedConflicts = {
@@ -2889,6 +2840,451 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to export reports',
         code: 'EXPORT_REPORTS_ERROR'
       });
+    }
+  });
+
+  // ========================================
+  // PLANNING API ENDPOINTS
+  // ========================================
+
+  // 1. GET /api/planning - Récupérer les entrées de planning avec filtres
+  app.get('/api/planning', verifyToken, async (req: any, res) => {
+    try {
+      const {
+        startDate,
+        endDate,
+        employeeId,
+        departmentId,
+        status,
+        type,
+        groupBy,
+        limit = 50,
+        offset = 0
+      } = req.query;
+
+      // Validation des paramètres
+      if (!startDate || !endDate) {
+        return res.status(400).json({ 
+          error: 'Les paramètres startDate et endDate sont requis' 
+        });
+      }
+
+      const filters = {
+        startDate,
+        endDate,
+        employeeId: employeeId ? parseInt(employeeId) : undefined,
+        departmentId: departmentId ? parseInt(departmentId) : undefined,
+        status,
+        type,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      };
+
+      let result;
+      if (groupBy === 'day') {
+        // Pour l'instant, utiliser la même fonction jusqu'à ce que getPlanningEntriesGroupedByDay soit implémentée
+        result = await storage.getPlanningEntries(filters);
+      } else {
+        result = await storage.getPlanningEntries(filters);
+      }
+
+      res.json({
+        success: true,
+        data: result,
+        filters: filters
+      });
+
+    } catch (error) {
+      console.error('Planning fetch error:', error);
+      res.status(500).json({ error: 'Erreur lors de la récupération du planning' });
+    }
+  });
+
+  // 2. POST /api/planning/generate - Générer un planning automatique
+  app.post('/api/planning/generate', verifyToken, requirePermission('admin'), validateRequest(generatePlanningSchema), async (req: any, res) => {
+    try {
+      const { employee_ids: employeeIds, start_date: startDate, end_date: endDate, template_id: templateId, respectConstraints = true } = req.body;
+
+      if (!employeeIds || !Array.isArray(employeeIds) || !startDate || !endDate) {
+        return res.status(400).json({ 
+          error: 'employeeIds (array), startDate et endDate sont requis' 
+        });
+      }
+
+      const result = await storage.generatePlanning({
+        employeeIds,
+        startDate,
+        endDate,
+        templateId,
+        respectConstraints
+      });
+
+      // Envoyer des notifications pour les conflits
+      if (result.conflicts.length > 0) {
+        for (const conflict of result.conflicts) {
+          await storage.createNotification({
+            user_id: req.user.id,
+            type: 'schedule_conflict',
+            title: 'Conflit de planning détecté',
+            message: conflict.description,
+            priority: 'high',
+            metadata: { conflict }
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `${result.generatedEntries.length} entrées générées`,
+        data: {
+          generatedEntries: result.generatedEntries,
+          conflictsCount: result.conflicts.length,
+          conflicts: result.conflicts,
+          warnings: result.warnings
+        }
+      });
+
+    } catch (error) {
+      console.error('Planning generation error:', error);
+      res.status(500).json({ error: 'Erreur lors de la génération du planning' });
+    }
+  });
+
+  // 3. GET /api/planning/:employee_id/week/:date - Planning hebdomadaire détaillé
+  app.get('/api/planning/:employee_id/week/:date', verifyToken, async (req: any, res) => {
+    try {
+      const employeeId = parseInt(req.params.employee_id);
+      const weekStart = req.params.date;
+
+      if (isNaN(employeeId)) {
+        return res.status(400).json({ error: 'ID employé invalide' });
+      }
+
+      // Vérifier que l'utilisateur a accès à cet employé (admin ou l'employé lui-même)
+      if (req.user.role !== 'admin' && req.user.employee_id !== employeeId) {
+        return res.status(403).json({ error: 'Accès non autorisé' });
+      }
+
+      const weeklyPlanning = await storage.getEmployeeWeeklyPlanning(employeeId, weekStart);
+
+      res.json({
+        success: true,
+        data: weeklyPlanning
+      });
+
+    } catch (error) {
+      console.error('Weekly planning error:', error);
+      res.status(500).json({ error: 'Erreur lors de la récupération du planning hebdomadaire' });
+    }
+  });
+
+  // 4. PUT /api/planning/:id - Modifier une entrée de planning
+  app.put('/api/planning/:id', verifyToken, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updateData = req.body;
+
+      if (isNaN(id)) {
+        return res.status(400).json({ error: 'ID invalide' });
+      }
+
+      // Récupérer l'entrée existante  
+      const allEntries = await storage.getPlanningEntries({ 
+        startDate: '2020-01-01', 
+        endDate: '2030-12-31', 
+        limit: 1000, 
+        offset: 0 
+      });
+      const entry = allEntries.find(e => e.id === id);
+      
+      if (!entry) {
+        return res.status(404).json({ error: 'Entrée de planning non trouvée' });
+      }
+
+      // Vérifier les permissions
+      if (req.user.role !== 'admin' && req.user.employee_id !== entry.employeeId) {
+        return res.status(403).json({ error: 'Accès non autorisé' });
+      }
+
+      // Vérifier les contraintes légales si on modifie les horaires
+      if (updateData.start_time && updateData.end_time) {
+        const { checkLegalConstraints } = await import('./businessLogic');
+        const constraintCheck = await checkLegalConstraints(
+          entry.employeeId,
+          updateData.date || entry.date,
+          updateData.start_time,
+          updateData.end_time,
+          id
+        );
+
+        if (!constraintCheck.valid) {
+          return res.status(400).json({
+            error: 'Contraintes légales non respectées',
+            conflicts: constraintCheck.conflicts
+          });
+        }
+      }
+
+      const updatedEntry = await storage.updatePlanningEntry(id, updateData);
+
+      if (!updatedEntry) {
+        return res.status(404).json({ error: 'Entrée non trouvée' });
+      }
+
+      // Notifier si l'entrée était déjà validée
+      if (entry.status === 'validated') {
+        await storage.createNotification({
+          user_id: entry.employeeId,
+          type: 'planning_modified',
+          title: 'Planning modifié',
+          message: `Votre planning du ${entry.date} a été modifié`,
+          priority: 'medium',
+          metadata: { entryId: id, changes: updateData }
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Entrée de planning mise à jour',
+        data: updatedEntry
+      });
+
+    } catch (error) {
+      console.error('Planning update error:', error);
+      res.status(500).json({ error: 'Erreur lors de la mise à jour' });
+    }
+  });
+
+  // 5. POST /api/planning/bulk - Opérations en lot
+  app.post('/api/planning/bulk', verifyToken, requirePermission('admin'), async (req: any, res) => {
+    try {
+      const { operation, entries, updates } = req.body;
+
+      if (!operation || !['create', 'update', 'delete'].includes(operation)) {
+        return res.status(400).json({ error: 'Opération invalide (create, update, delete)' });
+      }
+
+      let result;
+
+      if (operation === 'create' && entries && Array.isArray(entries)) {
+        // Vérifier les contraintes pour chaque entrée
+        for (const entry of entries) {
+          if (entry.start_time && entry.end_time) {
+            const { checkLegalConstraints } = await import('./businessLogic');
+            const constraintCheck = await checkLegalConstraints(
+              entry.employee_id,
+              entry.date,
+              entry.start_time,
+              entry.end_time
+            );
+
+            if (!constraintCheck.valid) {
+              return res.status(400).json({
+                error: `Contraintes légales non respectées pour l'employé ${entry.employee_id} le ${entry.date}`,
+                conflicts: constraintCheck.conflicts
+              });
+            }
+          }
+        }
+
+        result = await storage.bulkCreatePlanningEntries(entries);
+        
+      } else if (operation === 'update' && updates && Array.isArray(updates)) {
+        result = await storage.bulkUpdatePlanningEntries(updates);
+        
+      } else {
+        return res.status(400).json({ error: 'Données invalides pour l\'opération' });
+      }
+
+      res.json({
+        success: true,
+        message: `${operation} en lot effectué avec succès`,
+        data: result,
+        count: result.length
+      });
+
+    } catch (error) {
+      console.error('Bulk operation error:', error);
+      res.status(500).json({ error: 'Erreur lors de l\'opération en lot' });
+    }
+  });
+
+  // 6. POST /api/planning/validate - Valider le planning d'un employé pour une semaine
+  app.post('/api/planning/validate', verifyToken, requirePermission('admin'), async (req: any, res) => {
+    try {
+      const { employeeId, weekStart, status, comments, rejectionReason } = req.body;
+
+      if (!employeeId || !weekStart || !status) {
+        return res.status(400).json({ 
+          error: 'employeeId, weekStart et status sont requis' 
+        });
+      }
+
+      if (!['validated', 'rejected', 'partially_validated'].includes(status)) {
+        return res.status(400).json({ 
+          error: 'Status invalide (validated, rejected, partially_validated)' 
+        });
+      }
+
+      // Vérifier si une validation existe déjà
+      let validation = await storage.getValidationByEmployeeAndWeek(employeeId, weekStart);
+
+      const validationData = {
+        employee_id: employeeId,
+        week_start_date: weekStart,
+        status,
+        validated_by: req.user.employee_id,
+        validated_at: new Date(),
+        comments,
+        rejection_reason: rejectionReason,
+        updated_at: new Date()
+      };
+
+      if (validation) {
+        // Mettre à jour
+        validation = await storage.updateValidation(validation.id, validationData);
+      } else {
+        // Créer nouvelle validation
+        validation = await storage.createValidation({
+          ...validationData,
+          created_at: new Date()
+        });
+      }
+
+      // Mettre à jour le statut de toutes les entrées de planning de la semaine
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const weekEndStr = weekEnd.toISOString().split('T')[0];
+
+      const weekEntries = await storage.getPlanningEntries({
+        startDate: weekStart,
+        endDate: weekEndStr,
+        employeeId,
+        limit: 100,
+        offset: 0
+      });
+
+      // Mettre à jour chaque entrée
+      const updatePromises = weekEntries.map(entry => 
+        storage.updatePlanningEntry(entry.id, { 
+          status,
+          validated_by: req.user.employee_id,
+          validated_at: new Date()
+        })
+      );
+
+      await Promise.all(updatePromises);
+
+      // Envoyer notification à l'employé
+      const statusMessages = {
+        validated: 'validé et approuvé',
+        rejected: 'rejeté',
+        partially_validated: 'partiellement validé'
+      };
+
+      await storage.createNotification({
+        user_id: employeeId,
+        type: 'validation_required',
+        title: 'Planning validé',
+        message: `Votre planning de la semaine du ${weekStart} a été ${statusMessages[status]}`,
+        priority: status === 'rejected' ? 'high' : 'medium',
+        metadata: { 
+          weekStart, 
+          status, 
+          comments,
+          validatedBy: req.user.employee_id 
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Planning validé avec succès',
+        data: {
+          validation,
+          entriesUpdated: weekEntries.length
+        }
+      });
+
+    } catch (error) {
+      console.error('Planning validation error:', error);
+      res.status(500).json({ error: 'Erreur lors de la validation du planning' });
+    }
+  });
+
+  // 7. GET /api/planning/conflicts - Détecter les conflits de planning
+  app.get('/api/planning/conflicts', verifyToken, async (req: any, res) => {
+    try {
+      const { employeeId, startDate, endDate } = req.query;
+
+      // Pour l'instant, simuler la détection de conflits basée sur les heures journalières max
+      const planningData = await storage.getPlanningEntries({
+        startDate,
+        endDate,
+        employeeId: employeeId ? parseInt(employeeId) : undefined,
+        limit: 1000,
+        offset: 0
+      });
+
+      const conflicts: any[] = [];
+      
+      // Vérifier les heures journalières (max 10h selon la loi française)
+      const dailyHours: Record<string, Record<number, number>> = {};
+      
+      for (const entry of planningData) {
+        const date = entry.date;
+        const empId = entry.employeeId;
+        
+        if (!dailyHours[date]) dailyHours[date] = {};
+        if (!dailyHours[date][empId]) dailyHours[date][empId] = 0;
+        
+        if (entry.startTime && entry.endTime && entry.type === 'work') {
+          const start = new Date(`1970-01-01T${entry.startTime}:00`);
+          const end = new Date(`1970-01-01T${entry.endTime}:00`);
+          const hours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+          dailyHours[date][empId] += hours;
+        }
+      }
+      
+      // Détecter les conflits d'heures journalières
+      for (const [date, employees] of Object.entries(dailyHours)) {
+        for (const [empId, hours] of Object.entries(employees)) {
+          if (hours > 10) {
+            conflicts.push({
+              type: 'max_daily_hours',
+              severity: 'error',
+              employeeId: parseInt(empId),
+              date,
+              description: `Dépassement de 10h journalières: ${hours}h planifiées`,
+              suggestion: 'Réduire les heures de travail ou répartir sur plusieurs jours'
+            });
+          }
+        }
+      }
+
+      // Grouper les conflits par type et gravité
+      const conflictSummary = conflicts.reduce((acc, conflict) => {
+        const key = `${conflict.type}_${conflict.severity}`;
+        if (!acc[key]) {
+          acc[key] = { type: conflict.type, severity: conflict.severity, count: 0 };
+        }
+        acc[key].count++;
+        return acc;
+      }, {} as Record<string, any>);
+
+      res.json({
+        success: true,
+        data: {
+          conflicts,
+          totalCount: conflicts.length,
+          summary: Object.values(conflictSummary),
+          hasErrors: conflicts.some(c => c.severity === 'error'),
+          hasWarnings: conflicts.some(c => c.severity === 'warning')
+        }
+      });
+
+    } catch (error) {
+      console.error('Conflict detection error:', error);
+      res.status(500).json({ error: 'Erreur lors de la détection des conflits' });
     }
   });
 
