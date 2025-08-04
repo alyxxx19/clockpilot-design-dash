@@ -1,352 +1,277 @@
-import React, { useState } from 'react';
-import { AdminSidebar } from '@/components/layouts/AdminSidebar';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { ExportButton } from '@/components/ExportButton';
+import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { 
+  FileSpreadsheet, 
+  Users, 
   Calendar,
-  Users,
   Clock,
   TrendingUp,
-  BarChart3,
-  FileText,
-  Download
+  Building2
 } from 'lucide-react';
-import { ExportButton } from '@/components/ExportButton';
 
-interface ReportMetric {
-  title: string;
-  value: string;
-  change: string;
-  trend: 'up' | 'down' | 'stable';
-  icon: React.ReactNode;
+interface Employee {
+  id: number;
+  firstName: string;
+  lastName: string;
+  department: string;
+  position: string;
 }
 
-export const Reports: React.FC = () => {
-  const [selectedPeriod, setSelectedPeriod] = useState('this-month');
-  const [selectedDepartment, setSelectedDepartment] = useState('all');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+export function Reports() {
+  // Fetch employees for export filters
+  const { data: employees = [] } = useQuery<Employee[]>({
+    queryKey: ['/api/employees'],
+  });
 
-  const metrics: ReportMetric[] = [
+  // Get unique departments
+  const departments = Array.from(new Set(employees.map(emp => emp.department))).filter(Boolean);
+
+  const reportCards = [
     {
-      title: 'Heures totales',
-      value: '1,247h',
-      change: '+12%',
-      trend: 'up',
-      icon: <Clock className="h-5 w-5" />
+      title: 'Planning d\'équipe',
+      description: 'Export complet du planning avec horaires et affectations',
+      icon: Calendar,
+      stats: { count: employees.length, label: 'employés' },
+      color: 'blue'
     },
     {
-      title: 'Employés actifs',
-      value: '23',
-      change: '+2',
-      trend: 'up',
-      icon: <Users className="h-5 w-5" />
+      title: 'Feuilles de temps',
+      description: 'Pointages et heures travaillées pour chaque employé',
+      icon: Clock,
+      stats: { count: '2.3k', label: 'entrées ce mois' },
+      color: 'green'
     },
     {
-      title: 'Heures supplémentaires',
-      value: '84h',
-      change: '-8%',
-      trend: 'down',
-      icon: <TrendingUp className="h-5 w-5" />
+      title: 'Rapports RH',
+      description: 'Analyses mensuelles avec statistiques détaillées',
+      icon: TrendingUp,
+      stats: { count: departments.length, label: 'départements' },
+      color: 'purple'
     },
     {
-      title: 'Taux de présence',
-      value: '94.2%',
-      change: '+1.5%',
-      trend: 'up',
-      icon: <BarChart3 className="h-5 w-5" />
+      title: 'Attestations',
+      description: 'Documents officiels avec signatures électroniques',
+      icon: FileSpreadsheet,
+      stats: { count: '100%', label: 'conformité' },
+      color: 'orange'
     }
   ];
-
-  const departmentStats = [
-    { name: 'Production', employees: 12, hours: 456, overtime: 32, attendance: 96 },
-    { name: 'Logistique', employees: 6, hours: 234, overtime: 18, attendance: 92 },
-    { name: 'Qualité', employees: 3, hours: 123, overtime: 12, attendance: 98 },
-    { name: 'Maintenance', employees: 2, hours: 89, overtime: 8, attendance: 91 }
-  ];
-
-  const weeklyData = [
-    { week: 'S1', planned: 280, actual: 276, variance: -4 },
-    { week: 'S2', planned: 280, actual: 289, variance: 9 },
-    { week: 'S3', planned: 280, actual: 275, variance: -5 },
-    { week: 'S4', planned: 280, actual: 282, variance: 2 }
-  ];
-
-  const getTrendColor = (trend: 'up' | 'down' | 'stable') => {
-    switch (trend) {
-      case 'up': return 'text-green-600';
-      case 'down': return 'text-red-600';
-      default: return 'text-gray-600';
-    }
-  };
-
-  const getTrendIcon = (trend: 'up' | 'down' | 'stable') => {
-    switch (trend) {
-      case 'up': return '↗';
-      case 'down': return '↘';
-      default: return '→';
-    }
-  };
-
-  const getVarianceColor = (variance: number) => {
-    if (variance > 5) return 'text-red-600 bg-red-50';
-    if (variance > 0) return 'text-orange-600 bg-orange-50';
-    if (variance < -5) return 'text-blue-600 bg-blue-50';
-    return 'text-green-600 bg-green-50';
-  };
 
   return (
-    <div className="min-h-screen bg-background">
-      <AdminSidebar />
-      
-      {/* Main Content */}
-      <main className="ml-64 min-h-screen p-8">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Rapports</h1>
-            <p className="text-muted-foreground mt-1">Analyses et statistiques des temps de travail</p>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <ExportButton 
-              type="reports" 
-              options={{
-                type: 'monthly',
-                dateRange: dateFrom && dateTo ? {
-                  start: dateFrom,
-                  end: dateTo
-                } : undefined
-              }}
-              className="size-sm"
-            />
-            <Button variant="outline" size="sm">
-              <Calendar className="w-4 h-4 mr-2" />
-              Programmer export
-            </Button>
-          </div>
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Rapports & Exports
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">
+            Générez et exportez vos données en Excel ou PDF
+          </p>
         </div>
+        
+        {/* Main Export Button */}
+        <ExportButton
+          employees={employees}
+          departments={departments}
+          variant="default"
+          size="lg"
+        />
+      </div>
 
-        {/* Filtres */}
-        <Card className="mb-6">
-          <CardContent className="p-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center space-x-2">
-                <Label>Période :</Label>
-                <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="today">Aujourd'hui</SelectItem>
-                    <SelectItem value="this-week">Cette semaine</SelectItem>
-                    <SelectItem value="this-month">Ce mois</SelectItem>
-                    <SelectItem value="last-month">Mois dernier</SelectItem>
-                    <SelectItem value="this-quarter">Ce trimestre</SelectItem>
-                    <SelectItem value="custom">Personnalisé</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {selectedPeriod === 'custom' && (
-                <>
-                  <div className="flex items-center space-x-2">
-                    <Label>Du :</Label>
-                    <Input 
-                      type="date" 
-                      value={dateFrom} 
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="w-40"
-                    />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Label>Au :</Label>
-                    <Input 
-                      type="date" 
-                      value={dateTo} 
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="w-40"
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="flex items-center space-x-2">
-                <Label>Département :</Label>
-                <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tous</SelectItem>
-                    <SelectItem value="production">Production</SelectItem>
-                    <SelectItem value="logistique">Logistique</SelectItem>
-                    <SelectItem value="qualite">Qualité</SelectItem>
-                    <SelectItem value="maintenance">Maintenance</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Métriques principales */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          {metrics.map((metric, index) => (
-            <Card key={index}>
+      {/* Stats Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {reportCards.map((card, index) => {
+          const Icon = card.icon;
+          const colorClasses = {
+            blue: 'text-blue-600 bg-blue-100 dark:bg-blue-900 dark:text-blue-300',
+            green: 'text-green-600 bg-green-100 dark:bg-green-900 dark:text-green-300',
+            purple: 'text-purple-600 bg-purple-100 dark:bg-purple-900 dark:text-purple-300',
+            orange: 'text-orange-600 bg-orange-100 dark:bg-orange-900 dark:text-orange-300'
+          };
+          
+          return (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
               <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {metric.title}
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className={`inline-flex p-2 rounded-lg ${colorClasses[card.color as keyof typeof colorClasses]} mb-3`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+                      {card.title}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                      {card.description}
                     </p>
-                    <p className="text-2xl font-bold">{metric.value}</p>
-                    <p className={`text-sm ${getTrendColor(metric.trend)}`}>
-                      {getTrendIcon(metric.trend)} {metric.change}
-                    </p>
-                  </div>
-                  <div className="text-muted-foreground">
-                    {metric.icon}
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-bold text-gray-900 dark:text-white">
+                        {card.stats.count}
+                      </span>
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
+                        {card.stats.label}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+          );
+        })}
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Statistiques par département */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Statistiques par département</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {departmentStats.map((dept, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <div>
-                      <p className="font-medium">{dept.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {dept.employees} employés
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium">{dept.hours}h</p>
-                      <div className="flex items-center space-x-2 text-sm">
-                        <span className="text-orange-600">+{dept.overtime}h sup.</span>
-                        <Badge variant="outline" className="text-xs">
-                          {dept.attendance}% présence
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Évolution hebdomadaire */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Évolution hebdomadaire</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {weeklyData.map((week, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <div>
-                      <p className="font-medium">{week.week}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {week.planned}h planifiées
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium">{week.actual}h réalisées</p>
-                      <Badge className={`text-xs ${getVarianceColor(week.variance)}`}>
-                        {week.variance > 0 ? '+' : ''}{week.variance}h
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Tableau de bord détaillé */}
+      {/* Export Options Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Quick Exports */}
         <Card>
           <CardHeader>
-            <CardTitle>Résumé détaillé</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" />
+              Exports rapides
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left p-2">Employé</th>
-                    <th className="text-left p-2">Département</th>
-                    <th className="text-right p-2">H. planifiées</th>
-                    <th className="text-right p-2">H. réalisées</th>
-                    <th className="text-right p-2">H. sup.</th>
-                    <th className="text-right p-2">Taux présence</th>
-                    <th className="text-right p-2">Écart</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b">
-                    <td className="p-2">Marie Dupont</td>
-                    <td className="p-2">Production</td>
-                    <td className="p-2 text-right">152h</td>
-                    <td className="p-2 text-right">148h</td>
-                    <td className="p-2 text-right">8h</td>
-                    <td className="p-2 text-right">
-                      <Badge variant="outline" className="text-green-600">97%</Badge>
-                    </td>
-                    <td className="p-2 text-right">
-                      <Badge className="text-xs bg-blue-50 text-blue-600">-4h</Badge>
-                    </td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="p-2">Jean Martin</td>
-                    <td className="p-2">Logistique</td>
-                    <td className="p-2 text-right">152h</td>
-                    <td className="p-2 text-right">156h</td>
-                    <td className="p-2 text-right">4h</td>
-                    <td className="p-2 text-right">
-                      <Badge variant="outline" className="text-green-600">98%</Badge>
-                    </td>
-                    <td className="p-2 text-right">
-                      <Badge className="text-xs bg-orange-50 text-orange-600">+4h</Badge>
-                    </td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="p-2">Sarah Wilson</td>
-                    <td className="p-2">Qualité</td>
-                    <td className="p-2 text-right">152h</td>
-                    <td className="p-2 text-right">152h</td>
-                    <td className="p-2 text-right">0h</td>
-                    <td className="p-2 text-right">
-                      <Badge variant="outline" className="text-green-600">100%</Badge>
-                    </td>
-                    <td className="p-2 text-right">
-                      <Badge className="text-xs bg-green-50 text-green-600">0h</Badge>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                <div>
+                  <h4 className="font-medium">Planning de la semaine</h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Export automatique des 7 prochains jours
+                  </p>
+                </div>
+                <ExportButton
+                  variant="outline"
+                  size="sm"
+                  employees={employees}
+                  departments={departments}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                <div>
+                  <h4 className="font-medium">Feuilles de temps du mois</h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Tous les pointages du mois en cours
+                  </p>
+                </div>
+                <ExportButton
+                  variant="outline"
+                  size="sm"
+                  employees={employees}
+                  departments={departments}
+                />
+              </div>
+              
+              <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                <div>
+                  <h4 className="font-medium">Rapport mensuel RH</h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Statistiques complètes avec graphiques
+                  </p>
+                </div>
+                <ExportButton
+                  variant="outline"
+                  size="sm"
+                  employees={employees}
+                  departments={departments}
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
-      </main>
+
+        {/* Export Statistics */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Statistiques d'export
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Exports ce mois
+                </span>
+                <Badge variant="secondary">24</Badge>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Format le plus utilisé
+                </span>
+                <Badge variant="default">Excel</Badge>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Taille moyenne
+                </span>
+                <Badge variant="outline">2.1 MB</Badge>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Temps de génération moyen
+                </span>
+                <Badge variant="outline">3.2s</Badge>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t">
+              <h4 className="font-medium mb-3">Départements actifs</h4>
+              <div className="flex flex-wrap gap-2">
+                {departments.slice(0, 4).map(dept => (
+                  <Badge key={dept} variant="secondary" className="flex items-center gap-1">
+                    <Building2 className="h-3 w-3" />
+                    {dept}
+                  </Badge>
+                ))}
+                {departments.length > 4 && (
+                  <Badge variant="outline">
+                    +{departments.length - 4} autres
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Help Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Aide et conseils</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <h4 className="font-medium mb-2">Formats disponibles</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Exportez vos données en Excel (.xlsx) pour l'analyse ou en PDF (.pdf) pour l'archivage et l'impression.
+              </p>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">Filtres avancés</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Utilisez les filtres par département, employé ou période pour obtenir exactement les données dont vous avez besoin.
+              </p>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">Conformité RGPD</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Tous les exports respectent les réglementations de protection des données et incluent uniquement les informations autorisées.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
-};
+}
+
+export default Reports;

@@ -47,6 +47,7 @@ import {
 } from "@shared/schema";
 import { initializeNotificationService, getNotificationService } from "./notificationService";
 import { ExportService } from "./exportService";
+import { exportService as newExportService, ExportOptions } from "./services/export.service";
 import { db } from "./db";
 import { setupHealthRoutes, metricsMiddleware } from "./monitoring";
 import { 
@@ -3212,7 +3213,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
-  // EXPORT ROUTES
+  // EXPORT ROUTES - New comprehensive implementation
+  // ========================================
+  
+  app.post('/api/export/comprehensive', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const exportOptions: ExportOptions = req.body;
+      
+      // Validate export options
+      const { type, format, dateRange, employeeIds, departmentFilter } = exportOptions;
+      
+      if (!type || !format || !dateRange) {
+        return res.status(400).json({ 
+          message: 'Type, format et période requis' 
+        });
+      }
+
+      // Permission check
+      const isAdmin = req.user!.role === 'admin';
+      let allowedEmployeeIds = employeeIds;
+      
+      if (!isAdmin) {
+        const currentEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentEmployee) {
+          return res.status(403).json({ message: 'Profil employé non trouvé' });
+        }
+        allowedEmployeeIds = [currentEmployee.id];
+      }
+
+      // Fetch data based on filters
+      const employees = await storage.getEmployees({
+        departmentFilter,
+        ids: allowedEmployeeIds
+      });
+
+      const timeEntries = await storage.getTimeEntries({
+        startDate: dateRange.start,
+        endDate: dateRange.end,
+        employeeIds: allowedEmployeeIds
+      });
+
+      const planningEntries = await storage.getPlanningEntries({
+        startDate: dateRange.start,
+        endDate: dateRange.end,
+        employeeIds: allowedEmployeeIds
+      });
+
+      const exportData = {
+        employees: employees.map(emp => ({
+          id: emp.id,
+          firstName: emp.firstName,
+          lastName: emp.lastName,
+          email: emp.email,
+          position: emp.position,
+          department: emp.department,
+          contractType: emp.contractType || 'CDI',
+          weeklyHours: emp.weeklyHours || 35
+        })),
+        timeEntries: timeEntries.map(entry => ({
+          id: entry.id,
+          employeeId: entry.employeeId,
+          employeeName: `${employees.find(e => e.id === entry.employeeId)?.firstName} ${employees.find(e => e.id === entry.employeeId)?.lastName}`,
+          clockIn: entry.clockIn || '',
+          clockOut: entry.clockOut || undefined,
+          type: entry.type as 'work' | 'break',
+          duration: entry.duration || 0,
+          date: entry.date || new Date().toISOString().split('T')[0]
+        })),
+        planningEntries: planningEntries.map(entry => ({
+          id: entry.id,
+          employeeId: entry.employeeId,
+          employeeName: `${employees.find(e => e.id === entry.employeeId)?.firstName} ${employees.find(e => e.id === entry.employeeId)?.lastName}`,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+          type: entry.type as 'work' | 'break' | 'vacation' | 'sick',
+          status: entry.status as 'planned' | 'validated' | 'rejected',
+          date: entry.date
+        }))
+      };
+
+      if (format === 'excel') {
+        await newExportService.generateExcelExport(exportData, exportOptions, res);
+      } else if (format === 'pdf') {
+        // Import PDF service 
+        const { pdfService } = await import('./services/pdf.service');
+        await pdfService.generatePDF(exportData, exportOptions, res);
+      } else {
+        res.status(400).json({ message: 'Format non supporté' });
+      }
+
+    } catch (error) {
+      console.error('Comprehensive export error:', error);
+      res.status(500).json({ 
+        message: 'Erreur lors de l\'export',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // ========================================
   
   // Initialize Export Service
