@@ -1,5 +1,5 @@
 import Redis from 'ioredis';
-import { logger } from './security';
+import logger from './logger';
 
 // Configuration Redis
 const redisConfig = {

@@ -1,8 +1,9 @@
 import express from 'express';
 import { db, pool } from './db';
-import redis from './redis';
+import { redis, cacheService } from './redis';
 import os from 'os';
 import process from 'process';
+import logger from './logger';
 
 interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
