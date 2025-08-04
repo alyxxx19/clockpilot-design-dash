@@ -48,6 +48,16 @@ import {
 import { initializeNotificationService, getNotificationService } from "./notificationService";
 import { ExportService } from "./exportService";
 import { db } from "./db";
+import { setupHealthRoutes, metricsMiddleware } from "./monitoring";
+import { 
+  securityMiddleware, 
+  compressionMiddleware, 
+  timeoutMiddleware,
+  authRateLimit,
+  apiRateLimit,
+  strictRateLimit,
+  securityAuditMiddleware
+} from "./security";
 import { sql, and, or, eq } from "drizzle-orm";
 import { timeEntries } from "@shared/schema";
 

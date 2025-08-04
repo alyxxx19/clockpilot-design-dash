@@ -59,8 +59,39 @@ describe('Business Logic', () => {
     });
   });
 
+  describe('detectPlanningConflicts', () => {
+    it('should detect overlapping time slots', () => {
+      const conflictingEntries = createConflictingEntries();
+      const conflicts = detectPlanningConflicts(conflictingEntries);
+      
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0].message).toContain('Overlap detected');
+    });
+
+    it('should not detect conflicts for non-overlapping entries', () => {
+      const nonConflictingEntries = [
+        { ...createTestPlanningEntry(), id: 1, startTime: '09:00', endTime: '12:00' },
+        { ...createTestPlanningEntry(), id: 2, startTime: '13:00', endTime: '17:00' }
+      ];
+      
+      const conflicts = detectPlanningConflicts(nonConflictingEntries);
+      expect(conflicts).toHaveLength(0);
+    });
+
+    it('should detect adjacent entries without minimum break', () => {
+      const adjacentEntries = [
+        { ...createTestPlanningEntry(), id: 1, startTime: '09:00', endTime: '12:00' },
+        { ...createTestPlanningEntry(), id: 2, startTime: '12:00', endTime: '17:00' }
+      ];
+      
+      const conflicts = detectPlanningConflicts(adjacentEntries);
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0].message).toContain('minimum break');
+    });
+  });
+
   describe('validateLegalConstraints', () => {
-    it('should validate legal daily hours limit', () => {
+    it('should validate legal daily hours limit (10 hours)', () => {
       const timeEntry = {
         ...createTestTimeEntry(),
         startTime: '08:00',
@@ -72,6 +103,145 @@ describe('Business Logic', () => {
       expect(result.isValid).toBe(true);
       expect(result.violations).toHaveLength(0);
     });
+
+    it('should reject daily hours exceeding 10 hours', () => {
+      const violationEntry = createLegalViolationEntry();
+      const result = validateLegalConstraints(violationEntry);
+      
+      expect(result.isValid).toBe(false);
+      expect(result.violations).toHaveLength(1);
+      expect(result.violations[0].type).toBe('daily_limit_exceeded');
+    });
+
+    it('should validate minimum break for long days', () => {
+      const timeEntry = {
+        ...createTestTimeEntry(),
+        startTime: '08:00',
+        endTime: '16:00', // 8 heures
+        breakDuration: 15 // Moins de 20 minutes minimum
+      };
+
+      const result = validateLegalConstraints(timeEntry);
+      expect(result.isValid).toBe(false);
+      expect(result.violations[0].type).toBe('insufficient_break');
+    });
+
+    it('should enforce night work restrictions', () => {
+      const nightEntry = {
+        ...createTestTimeEntry(),
+        startTime: '23:00',
+        endTime: '05:00' // Travail de nuit
+      };
+
+      const result = validateLegalConstraints(nightEntry);
+      expect(result.isValid).toBe(false);
+      expect(result.violations[0].type).toBe('night_work_violation');
+    });
+  });
+
+  describe('isWithinDailyLimit', () => {
+    it('should return true for normal working hours', () => {
+      expect(isWithinDailyLimit(8)).toBe(true);
+      expect(isWithinDailyLimit(10)).toBe(true);
+    });
+
+    it('should return false for excessive hours', () => {
+      expect(isWithinDailyLimit(11)).toBe(false);
+      expect(isWithinDailyLimit(15)).toBe(false);
+    });
+
+    it('should handle edge cases', () => {
+      expect(isWithinDailyLimit(0)).toBe(true);
+      expect(isWithinDailyLimit(10.5)).toBe(false);
+    });
+  });
+
+  describe('isWithinWeeklyLimit', () => {
+    it('should return true for normal weekly hours', () => {
+      expect(isWithinWeeklyLimit(35)).toBe(true);
+      expect(isWithinWeeklyLimit(48)).toBe(true);
+    });
+
+    it('should return false for excessive weekly hours', () => {
+      expect(isWithinWeeklyLimit(49)).toBe(false);
+      expect(isWithinWeeklyLimit(60)).toBe(false);
+    });
+  });
+
+  describe('hasMinimumRestPeriod', () => {
+    it('should validate sufficient rest period', () => {
+      const lastEnd = '18:00';
+      const nextStart = '08:00';
+      
+      expect(hasMinimumRestPeriod(lastEnd, nextStart)).toBe(true);
+    });
+
+    it('should reject insufficient rest period', () => {
+      const lastEnd = '22:00';
+      const nextStart = '07:00'; // Seulement 9 heures
+      
+      expect(hasMinimumRestPeriod(lastEnd, nextStart)).toBe(false);
+    });
+
+    it('should handle cross-midnight scenarios', () => {
+      const lastEnd = '01:00';
+      const nextStart = '14:00'; // 13 heures de repos
+      
+      expect(hasMinimumRestPeriod(lastEnd, nextStart)).toBe(true);
+    });
+  });
+
+  describe('detectAnomalies', () => {
+    it('should detect missing breaks for long days', () => {
+      const longDayEntry = {
+        ...createTestTimeEntry(),
+        startTime: '08:00',
+        endTime: '18:00', // 10 heures
+        breakDuration: 0 // Pas de pause
+      };
+
+      const anomalies = detectAnomalies([longDayEntry]);
+      expect(anomalies).toHaveLength(1);
+      expect(anomalies[0].type).toBe('missing_break');
+    });
+
+    it('should detect unauthorized overtime', () => {
+      const overtimeEntry = {
+        ...createTestTimeEntry(),
+        workedHours: 12,
+        overtimeHours: 2,
+        overtimeApproved: false
+      };
+
+      const anomalies = detectAnomalies([overtimeEntry]);
+      expect(anomalies).toHaveLength(1);
+      expect(anomalies[0].type).toBe('unauthorized_overtime');
+    });
+
+    it('should detect weekend work without authorization', () => {
+      const weekendEntry = {
+        ...createTestTimeEntry(),
+        date: '2024-08-04', // Dimanche
+        weekendAuthorized: false
+      };
+
+      const anomalies = detectAnomalies([weekendEntry]);
+      expect(anomalies).toHaveLength(1);
+      expect(anomalies[0].type).toBe('unauthorized_weekend_work');
+    });
+
+    it('should detect late night work patterns', () => {
+      const lateNightEntry = {
+        ...createTestTimeEntry(),
+        startTime: '23:00',
+        endTime: '02:00'
+      };
+
+      const anomalies = detectAnomalies([lateNightEntry]);
+      expect(anomalies).toHaveLength(1);
+      expect(anomalies[0].type).toBe('late_night_work');
+    });
+  });
 
     it('should detect daily hours violation', () => {
       const timeEntry = {

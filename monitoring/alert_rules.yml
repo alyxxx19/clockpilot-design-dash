@@ -1,0 +1,93 @@
+# ========================
+# Prometheus Alert Rules for ClockPilot
+# ========================
+
+groups:
+  - name: clockpilot.rules
+    rules:
+      # Application Health Alerts
+      - alert: ClockPilotDown
+        expr: up{job="clockpilot-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClockPilot application is down"
+          description: "ClockPilot application has been down for more than 1 minute."
+
+      - alert: ClockPilotHighResponseTime
+        expr: clockpilot_response_time_average > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClockPilot high response time"
+          description: "ClockPilot average response time is {{ $value }}ms for more than 5 minutes."
+
+      - alert: ClockPilotHighErrorRate
+        expr: rate(clockpilot_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClockPilot high error rate"
+          description: "ClockPilot error rate is {{ $value }} errors per second."
+
+      # System Resource Alerts
+      - alert: HighMemoryUsage
+        expr: clockpilot_memory_usage_bytes > 800000000  # 800MB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "ClockPilot memory usage is {{ $value }} bytes."
+
+      - alert: DatabaseConnectionIssue
+        expr: clockpilot_database_connections_active == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection issue"
+          description: "No active database connections detected."
+
+      # Database Alerts
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database has been down for more than 1 minute."
+
+      # Redis Alerts
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis is down"
+          description: "Redis has been down for more than 2 minutes."
+
+      # Nginx Alerts
+      - alert: NginxDown
+        expr: up{job="nginx"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nginx is down"
+          description: "Nginx reverse proxy has been down for more than 1 minute."
+
+      # Disk Space Alert
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 10% on {{ $labels.instance }}."

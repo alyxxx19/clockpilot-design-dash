@@ -1,211 +1,258 @@
-# 🧪 Suite de Tests ClockPilot
+# Guide de Tests - ClockPilot
 
 ## Vue d'ensemble
 
-Cette suite de tests complète couvre les aspects critiques de l'application ClockPilot avec un objectif de couverture minimum de 70%.
+ClockPilot dispose d'une suite complète de tests couvrant tous les aspects de l'application, avec Jest comme framework principal et une couverture minimum de 70% pour garantir la qualité du code.
 
-## Architecture des Tests
+## Structure des Tests
 
-### Backend (Jest + Supertest)
-- **Location**: `server/*.test.ts`
-- **Environment**: Node.js
-- **Coverage**: Logique métier, API, authentification
+### 📁 Configuration de Base
+- `jest.config.js` - Configuration multi-projets (backend/frontend)
+- `tests/setup/backend.setup.ts` - Configuration et helpers pour tests backend
+- `tests/setup/frontend.setup.ts` - Configuration MSW et helpers React Testing Library
+- `tests/setup/env.setup.ts` - Variables d'environnement pour tests
 
-### Frontend (Jest + React Testing Library)
-- **Location**: `client/src/**/*.test.tsx`
-- **Environment**: jsdom
-- **Coverage**: Composants, hooks, pages
+### 🔧 Backend Tests (Node.js/Express)
 
-### Configuration
-- **Jest Config**: `jest.config.js` - Configuration multi-projets
-- **Setup Backend**: `tests/setup/backend.setup.ts`
-- **Setup Frontend**: `tests/setup/frontend.setup.ts`
+#### API Tests - CRUD Operations
+- **Employees API** (`server/employees.test.ts`)
+  - ✅ CRUD complet avec pagination et filtrage
+  - ✅ Validation des données et contraintes métier
+  - ✅ Gestion des rôles et permissions
+  - ✅ Statistiques et rapports
 
-## Tests Implémentés
+- **Planning API** (`server/planning.test.ts`)
+  - ✅ Génération automatique avec contraintes légales françaises
+  - ✅ Détection de conflits et chevauchements
+  - ✅ Validation des limites : 10h/jour, 48h/semaine
+  - ✅ Validation des périodes de repos minimum (11h)
+  - ✅ Workflow de validation et notifications
 
-### 🔐 Authentification (`server/auth.test.ts`)
-- ✅ Login avec credentials valides/invalides
-- ✅ Validation format email
-- ✅ Refresh token (valide/expiré/invalide)
-- ✅ Logout réussi
-- ✅ Protection middleware
-- ✅ Autorisation par rôle (admin/employee)
+- **Time Entries API** (`server/time-entries.test.ts`)
+  - ✅ Suivi du temps avec validation en temps réel
+  - ✅ Calcul automatique des heures supplémentaires
+  - ✅ Détection d'anomalies (pauses manquantes, horaires suspects)
+  - ✅ Comparaison planifié vs réalisé
+  - ✅ Processus de validation par les managers
 
-### 📊 Logique Métier (`server/business-logic.test.ts`)
-- ✅ Calcul heures travaillées (avec/sans pause, cross-midnight)
-- ✅ Calcul heures supplémentaires
-- ✅ Validation contraintes légales françaises:
-  - Limite quotidienne (10h/jour)
-  - Limite hebdomadaire (48h/semaine)
-  - Pause obligatoire (20min pour 6h+)
-  - Repos minimum (11h entre journées)
-- ✅ Détection conflits planning:
+- **Projects & Tasks API** (`server/projects-tasks.test.ts`)
+  - ✅ Gestion complète des projets avec budget et suivi
+  - ✅ Tâches avec assignation et suivi de progression
+  - ✅ Dashboard analytique pour admin et employés
+  - ✅ Gestion des membres et rôles par projet
+
+#### Business Logic Tests (`server/business-logic.test.ts`)
+- ✅ **Calculs de Temps**
+  - Heures travaillées avec gestion cross-midnight
+  - Calcul des heures supplémentaires
+  - Validation des pauses obligatoires
+
+- ✅ **Contraintes Légales Françaises**
+  - Limite quotidienne : 10 heures maximum
+  - Limite hebdomadaire : 48 heures maximum
+  - Repos minimum : 11 heures entre les shifts
+  - Restrictions travail de nuit (22h-6h)
+
+- ✅ **Détection d'Anomalies**
+  - Pauses manquantes pour journées longues
+  - Heures supplémentaires non autorisées
+  - Travail weekend sans autorisation
+  - Patterns de travail suspects
+
+- ✅ **Détection de Conflits**
   - Chevauchements de créneaux
-  - Pauses insuffisantes
-  - Dépassements légaux
+  - Conflits avec les congés
+  - Violations des contraintes légales
 
-### 🧩 Composants Frontend
+#### Integration Flow Tests (`server/integration-flow.test.ts`)
+- ✅ **Workflow Complet Planning → Time Entry → Validation**
+  - Création planning par admin
+  - Saisie temps par employé avec déviations mineures
+  - Soumission pour validation
+  - Validation/rejet par manager
+  - Génération analytics comparatif
 
-#### FilterBar (`client/src/components/FilterBar.test.tsx`)
-- ✅ Rendu champ recherche et boutons
-- ✅ Gestion saisie recherche
-- ✅ Ouverture/fermeture panneau filtres
-- ✅ Filtres select, date, boolean
-- ✅ Affichage et suppression chips de filtres actifs
-- ✅ Changement tri et direction
-- ✅ Réinitialisation filtres
-- ✅ Sauvegarde jeux de filtres
-- ✅ Navigation clavier
-- ✅ Gestion cas limites (filtres vides)
+- ✅ **Gestion des Conflits et Erreurs**
+  - Rollback automatique en cas d'échec bulk
+  - Gestion des succès partiels
+  - Recovery et notifications d'erreur
 
-#### TimeSlotGrid (`client/src/components/TimeSlotGrid.test.tsx`)
-- ✅ Affichage entrées de temps par date
-- ✅ Calcul et affichage heures travaillées
-- ✅ Badges de statut (brouillon, soumis, validé)
-- ✅ Sélection entrées de temps
-- ✅ Édition/suppression avec confirmation
-- ✅ États loading et vide
-- ✅ Bouton ajout nouvelle entrée
-- ✅ Affichage pauses et heures supplémentaires
-- ✅ Navigation clavier
-- ✅ Tri par heure de début
+- ✅ **Tests de Performance**
+  - Gestion de gros volumes de données (1000+ entrées)
+  - Requêtes concurrentes
+  - Temps de réponse < 1 seconde
 
-#### TimeEntryForm (`client/src/components/forms/TimeEntryForm.test.tsx`)
-- ✅ Rendu champs formulaire
-- ✅ Population données existantes
-- ✅ Validation champs requis
-- ✅ Validation logique temporelle
-- ✅ Calcul automatique heures travaillées
-- ✅ Détection heures supplémentaires et alertes légales
-- ✅ Soumission formulaire
-- ✅ Gestion annulation
-- ✅ État loading
-- ✅ Gestion erreurs API
-- ✅ Navigation clavier
-- ✅ Alertes pause réglementaire
-- ✅ Gestion créneaux de nuit
+#### Authentication Tests (`server/auth.test.ts`)
+- ✅ Login/logout avec JWT
+- ✅ Gestion des tokens refresh
+- ✅ Protection des routes par rôle
+- ✅ Gestion de l'expiration des tokens
 
-### 🎣 Hooks
+### 🎨 Frontend Tests (React/TypeScript)
 
-#### useAuth (`client/src/hooks/useAuth.test.tsx`)
-- ✅ État loading initial
-- ✅ Authentification avec token valide
-- ✅ Gestion erreurs d'authentification
-- ✅ Scénario sans token
-- ✅ Gestion erreurs réseau
+#### Component Tests
+- **FilterBar** (`client/src/components/FilterBar.test.tsx`)
+  - ✅ Gestion des filtres multiples (search, select, date, boolean)
+  - ✅ Synchronisation URL pour persistance des filtres
+  - ✅ Sauvegarde/chargement de sets de filtres
+  - ✅ Reset et validation des entrées
 
-### 📄 Pages
+- **TimeSlotGrid** (`client/src/components/TimeSlotGrid.test.tsx`)
+  - ✅ Affichage grille temporelle interactive
+  - ✅ Drag & drop pour modification créneaux
+  - ✅ Gestion des overlaps visuels
+  - ✅ Validation en temps réel des contraintes
 
-#### TimeEntry (`client/src/pages/employee/TimeEntry.test.tsx`)
-- ✅ Rendu page saisie des temps
-- ✅ Sélection de date
-- ✅ Ajout nouvelle entrée
-- ✅ Sélection entrée existante
-- ✅ Chargement entrées par date
-- ✅ Gestion erreurs API
-- ✅ État loading
-- ✅ Accessibilité (headings)
-- ✅ Navigation entre dates
-- ✅ Validation formulaire
+#### Hook Tests
+- **useAuth** (`client/src/hooks/useAuth.test.tsx`)
+  - ✅ Gestion état d'authentification
+  - ✅ Auto-refresh des tokens
+  - ✅ Gestion des erreurs de connexion
+  - ✅ Persistance localStorage
 
-### 🔗 Tests d'Intégration (`server/integration.test.ts`)
-- ✅ Health check API
-- ✅ Flow complet authentification (register → login → access)
-- ✅ Opérations CRUD employés
-- ✅ Gestion erreurs (validation, 404, unauthorized)
-- ✅ Tests performance (requêtes concurrentes, temps de réponse)
+#### API Integration Tests
+- ✅ Mock Service Worker (MSW) pour tests API
+- ✅ Tests des hooks React Query
+- ✅ Gestion des états de chargement et erreurs
+- ✅ Optimistic updates et cache invalidation
 
-## Commandes de Test
+## 🎯 Couverture et Objectifs
 
+### Métriques de Couverture (Minimum 70%)
+- **Branches**: 70%+ - Tests de toutes les conditions
+- **Functions**: 70%+ - Tests de toutes les fonctions exportées
+- **Lines**: 70%+ - Tests de la logique métier critique
+- **Statements**: 70%+ - Tests des chemins d'exécution
+
+### Zones Critiques Testées
+- ✅ **Sécurité** - Authentification, autorisation, validation inputs
+- ✅ **Conformité Légale** - Contraintes droit du travail français
+- ✅ **Logique Métier** - Calculs temps, détection anomalies, conflits
+- ✅ **API Robustesse** - Gestion erreurs, validation données
+- ✅ **Performance** - Tests de charge, concurrence
+- ✅ **UX Critique** - Workflows utilisateur complets
+
+## 🚀 Exécution des Tests
+
+### Commandes de Base
 ```bash
-# Exécuter tous les tests
-npm run test
-
-# Tests en mode watch
-npm run test:watch
-
-# Tests avec couverture
-npm run test:coverage
+# Tous les tests
+npm test
 
 # Tests backend uniquement
 npm run test:backend
 
-# Tests frontend uniquement
+# Tests frontend uniquement  
 npm run test:frontend
 
-# Tests CI/CD
-npm run test:ci
+# Tests avec couverture
+npm run test:coverage
+
+# Tests en mode watch
+npm run test:watch
 ```
 
-## Configuration Mock Service Worker (MSW)
+### Tests Spécifiques
+```bash
+# Tests d'un module spécifique
+npm test -- --testPathPattern="employees"
 
-Le setup utilise MSW pour mocker les appels API dans les tests frontend:
-- Endpoints d'authentification
-- Endpoints employés
-- Endpoints entrées de temps
-- Gestion erreurs et états de loading
+# Tests avec pattern
+npm test -- --testNamePattern="legal constraints"
 
-## Helpers de Test
+# Tests verbose avec détails
+npm test -- --verbose
+```
 
-### Backend
-- `createTestUser()` - Utilisateur de test
-- `createTestEmployee()` - Employé de test  
-- `createTestTimeEntry()` - Entrée de temps de test
+### Rapports de Couverture
+- **HTML Report**: `coverage/lcov-report/index.html`
+- **JSON Report**: `coverage/coverage-final.json`
+- **Text Summary**: Affiché dans la console
 
-### Frontend
-- `renderWithProviders()` - Wrapper avec QueryClient et Router
-- `server` - Instance MSW pour mocks API
-- Mocks localStorage et sessionStorage
+## 🛠️ Outils et Technologies
 
-## Couverture de Code
+### Framework de Test
+- **Jest** - Framework principal avec support TypeScript
+- **React Testing Library** - Tests composants React
+- **Supertest** - Tests API HTTP
+- **MSW (Mock Service Worker)** - Mock des APIs
+- **@testing-library/user-event** - Simulation interactions utilisateur
 
-### Objectifs de Couverture (70% minimum)
-- **Branches**: 70%
-- **Functions**: 70%
-- **Lines**: 70%
-- **Statements**: 70%
+### Mocks et Helpers
+- **Database Mocking** - Mock complet de Drizzle ORM
+- **Storage Helpers** - Données de test réutilisables
+- **JWT Helpers** - Génération tokens pour tests
+- **Time Helpers** - Manipulation dates/heures pour tests
 
-### Exclusions de Couverture
-- Fichiers de types TypeScript (*.d.ts)
-- Points d'entrée (main.tsx, index.ts)
-- Configuration Vite
+### Configuration Jest Multi-Projets
+- **Backend Project** - Tests Node.js avec ts-jest
+- **Frontend Project** - Tests React avec jsdom
+- **Shared Utilities** - Helpers communs et setup
 
-## Bonnes Pratiques
+## 📋 Checklist Tests par Feature
 
-### Tests Backend
-- Utiliser des mocks pour la base de données
-- Tester les cas d'erreur et de succès
-- Valider la structure des réponses JSON
-- Tester les middlewares d'authentification
+### ✅ Authentication
+- [x] Login/logout flows
+- [x] JWT token management
+- [x] Role-based access control
+- [x] Token refresh mechanism
+- [x] Unauthorized error handling
 
-### Tests Frontend
-- Utiliser `data-testid` sur les éléments interactifs
-- Tester les interactions utilisateur avec userEvent
-- Utiliser `waitFor` pour les opérations async
-- Mocker les composants complexes si nécessaire
+### ✅ Employee Management
+- [x] CRUD operations complete
+- [x] Advanced filtering and search
+- [x] Pagination and sorting
+- [x] Input validation
+- [x] Statistics and analytics
 
-### Tests d'Intégration
-- Tester les flows complets utilisateur
-- Valider les performances
-- Tester la gestion d'erreurs bout en bout
+### ✅ Planning Management
+- [x] Auto-generation with templates
+- [x] Legal constraints validation
+- [x] Conflict detection
+- [x] Bulk operations
+- [x] Approval workflow
 
-## Maintenance
+### ✅ Time Tracking
+- [x] Real-time entry validation
+- [x] Overtime calculations
+- [x] Anomaly detection
+- [x] Planned vs actual analysis
+- [x] Multi-level approval
 
-### Ajout de Nouveaux Tests
-1. Créer le fichier `*.test.ts(x)` à côté du code source
-2. Utiliser les helpers de setup appropriés
-3. Suivre les patterns existants
-4. Maintenir la couverture à 70%+
+### ✅ Projects & Tasks
+- [x] Project lifecycle management
+- [x] Task assignment and tracking
+- [x] Progress monitoring
+- [x] Budget tracking
+- [x] Team collaboration
 
-### Debugging Tests
-- Utiliser `screen.debug()` pour inspecter le DOM
-- Consulter les logs Jest pour les erreurs
-- Utiliser `--verbose` pour plus de détails
+### ✅ Legal Compliance
+- [x] French labor law constraints
+- [x] Daily/weekly hour limits
+- [x] Mandatory rest periods
+- [x] Night work restrictions
+- [x] Break requirements
 
-## Intégration CI/CD
+## 🎯 Standards de Qualité
 
-Les tests sont configurés pour:
-- Exécution automatique en CI avec `npm run test:ci`
-- Génération de rapports de couverture
-- Détection des tests en échec
-- Mode non-interactif pour les environnements CI
+### Test Design Principles
+- **Isolation** - Chaque test est indépendant
+- **Repeatability** - Résultats constants
+- **Fast Execution** - Suite complète < 30 secondes
+- **Clear Naming** - Tests auto-documentés
+- **Edge Cases** - Couverture des cas limites
+
+### Mock Strategy
+- **External APIs** - Toujours mockés avec MSW
+- **Database** - Mockée avec fonctions Jest
+- **File System** - Mockée pour tests upload
+- **Time/Dates** - Contrôlées pour reproductibilité
+
+### Error Testing
+- **Network Failures** - Tests de résilience réseau
+- **Database Errors** - Gestion pannes DB
+- **Validation Errors** - Inputs malformés
+- **Authorization Errors** - Accès non autorisé
+- **Business Logic Errors** - Violations règles métier
+
+Cette suite de tests garantit la fiabilité et la conformité de ClockPilot avec les exigences métier et légales, tout en maintenant une excellente expérience utilisateur.

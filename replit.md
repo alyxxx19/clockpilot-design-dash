@@ -81,3 +81,13 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **Formats**: Support for both Excel (.xlsx) and PDF formats across all export types
 - **Infrastructure**: Chromium properly configured for Replit environment with appropriate system dependencies
 - **Performance**: Optimized export generation with proper memory management and timeout handling
+
+## Comprehensive Testing Suite (2025-01-04)
+- **Complete Test Coverage**: Implemented comprehensive Jest testing suite covering all application layers with 70% minimum coverage target
+- **Backend Testing**: Complete API tests for employees, planning, time entries, projects/tasks with legal constraint validation and business logic testing
+- **Integration Testing**: Full workflow tests covering planning→time entry→validation flows, bulk operations, and error recovery scenarios
+- **Frontend Testing**: React component tests with React Testing Library, API hooks testing with MSW, and user interaction validation
+- **Legal Compliance Testing**: Comprehensive validation of French labor law constraints (10h/day, 48h/week, 11h rest periods)
+- **Performance Testing**: Load testing for large datasets, concurrent request handling, and response time validation
+- **Testing Infrastructure**: Multi-project Jest configuration, MSW for API mocking, comprehensive test helpers and fixtures
+- **Documentation**: Complete testing guide (README-TESTS.md) with execution instructions, coverage reports, and quality standards

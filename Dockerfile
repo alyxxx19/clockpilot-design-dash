@@ -50,12 +50,20 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 clockpilot && \
     adduser --system --uid 1001 clockpilot
 
-# Install runtime dependencies
+# Install runtime dependencies and security tools
 RUN apk add --no-cache \
     dumb-init \
     curl \
     postgresql-client \
-    tzdata
+    tzdata \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    && rm -rf /var/cache/apk/*
 
 # Set timezone
 ENV TZ=Europe/Paris
@@ -78,10 +86,13 @@ RUN mkdir -p uploads && chown clockpilot:clockpilot uploads
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-# Health check
+# Advanced health check with multiple endpoints
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:5000/api/health || exit 1
+    CMD curl -f http://localhost:5000/api/health/ready && \
+        curl -f http://localhost:5000/api/health/live || exit 1
 
 # Switch to non-root user
 USER clockpilot
