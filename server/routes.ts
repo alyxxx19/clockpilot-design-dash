@@ -33,6 +33,14 @@ import {
   createNotificationSchema,
   notificationQuerySchema,
   markReadSchema,
+  projectsApiQuerySchema,
+  assignProjectMemberApiSchema,
+  updateProjectApiSchema,
+  tasksApiQuerySchema,
+  updateTaskStatusApiSchema,
+  insertTaskApiSchema,
+  updateTaskApiSchema,
+  insertProjectSchema,
   type User,
   type Employee,
   type Notification
@@ -2674,182 +2682,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ========================================
-  // EXPORT ROUTES (Legacy - see line 3336+ for updated version)
-  // ========================================
 
-  // Export planning data
-  app.get('/api/planning/export', authenticateToken, authorizeRole(['admin', 'employee']), async (req: AuthRequest, res: Response) => {
-    try {
-      const { format, date_from, date_to, employee_ids } = req.query;
-      
-      if (!format || !['excel', 'pdf'].includes(format as string)) {
-        return res.status(400).json({
-          error: 'Format must be excel or pdf',
-          code: 'INVALID_FORMAT'
-        });
-      }
 
-      // Build query parameters
-      const queryParams: any = {};
-      if (date_from) queryParams.date_from = date_from;
-      if (date_to) queryParams.date_to = date_to;
-      if (employee_ids) queryParams.employee_ids = employee_ids;
-      
-      // For employees, only allow their own data
-      if (req.user!.role === 'employee') {
-        const employee = await storage.getEmployeeByUserId(req.user!.id);
-        if (employee) {
-          queryParams.employee_ids = employee.id;
-        }
-      }
 
-      // Get planning data
-      const planningData = await storage.getPlanningEntries(queryParams);
-      
-      const exportOptions = {
-        format: format as 'excel' | 'pdf',
-        dateRange: date_from && date_to ? {
-          start: date_from as string,
-          end: date_to as string
-        } : undefined,
-        employeeIds: employee_ids ? (Array.isArray(employee_ids) ? employee_ids as string[] : [employee_ids as string]) : undefined
-      };
 
-      const buffer = await exportService.exportPlanning(planningData, exportOptions);
-      
-      const filename = `planning-${format === 'excel' ? 'xlsx' : 'pdf'}-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
-      
-      res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
 
-    } catch (error) {
-      console.error('Export planning error:', error);
-      res.status(500).json({
-        error: 'Failed to export planning',
-        code: 'EXPORT_PLANNING_ERROR'
-      });
-    }
-  });
 
-  // Export time entries data
-  app.get('/api/time-entries/export', authenticateToken, authorizeRole(['admin', 'employee']), async (req: AuthRequest, res: Response) => {
-    try {
-      const { format, date_from, date_to, employee_ids } = req.query;
-      
-      if (!format || !['excel', 'pdf'].includes(format as string)) {
-        return res.status(400).json({
-          error: 'Format must be excel or pdf',
-          code: 'INVALID_FORMAT'
-        });
-      }
 
-      // Build query parameters
-      const queryParams: any = {};
-      if (date_from) queryParams.date_from = date_from;
-      if (date_to) queryParams.date_to = date_to;
-      if (employee_ids) queryParams.employee_ids = employee_ids;
-      
-      // For employees, only allow their own data
-      if (req.user!.role === 'employee') {
-        const employee = await storage.getEmployeeByUserId(req.user!.id);
-        if (employee) {
-          queryParams.employee_ids = employee.id;
-        }
-      }
-
-      // Get time entries data
-      const timeEntriesData = await storage.getTimeEntries(queryParams);
-      
-      const exportOptions = {
-        format: format as 'excel' | 'pdf',
-        dateRange: date_from && date_to ? {
-          start: date_from as string,
-          end: date_to as string
-        } : undefined,
-        employeeIds: employee_ids ? (Array.isArray(employee_ids) ? employee_ids as string[] : [employee_ids as string]) : undefined
-      };
-
-      const buffer = await exportService.exportTimeEntries(timeEntriesData, exportOptions);
-      
-      const filename = `time-entries-${format === 'excel' ? 'xlsx' : 'pdf'}-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
-      
-      res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
-
-    } catch (error) {
-      console.error('Export time entries error:', error);
-      res.status(500).json({
-        error: 'Failed to export time entries',
-        code: 'EXPORT_TIME_ENTRIES_ERROR'
-      });
-    }
-  });
-
-  // Export reports data
-  app.get('/api/reports/export', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
-    try {
-      const { format, type = 'monthly', date_from, date_to } = req.query;
-      
-      if (!format || !['excel', 'pdf'].includes(format as string)) {
-        return res.status(400).json({
-          error: 'Format must be excel or pdf',
-          code: 'INVALID_FORMAT'
-        });
-      }
-
-      // Get employees with their statistics
-      const employees = await storage.getAllEmployees();
-      
-      // Calculate monthly statistics for each employee
-      const reportsData = await Promise.all(employees.map(async (employee) => {
-        const stats = await storage.getEmployeeStats(employee.id);
-        
-        // Calculate additional payroll data
-        const regularHours = Math.min(stats.weeklyHours || 0, 35); // 35h legal weekly limit
-        const overtime25 = Math.max(0, Math.min((stats.weeklyHours || 0) - 35, 8)); // Next 8h at 25%
-        const overtime50 = Math.max(0, (stats.weeklyHours || 0) - 43); // Above 43h at 50%
-        
-        return {
-          ...employee,
-          plannedHours: stats.weeklyHours || 0,
-          workedHours: stats.totalHours || 0,
-          overtimeHours: stats.overtimeHours || 0,
-          workingDays: Math.ceil((stats.totalHours || 0) / 7), // Approximation
-          regularHours,
-          overtime25,
-          overtime50,
-          vacationDays: stats.vacationDays || 0,
-          sickDays: stats.sickDays || 0,
-        };
-      }));
-      
-      const exportOptions = {
-        format: format as 'excel' | 'pdf',
-        dateRange: date_from && date_to ? {
-          start: date_from as string,
-          end: date_to as string
-        } : undefined
-      };
-
-      const buffer = await exportService.exportReports(reportsData, exportOptions);
-      
-      const filename = `reports-${type}-${format === 'excel' ? 'xlsx' : 'pdf'}-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
-      
-      res.setHeader('Content-Type', format === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(buffer);
-
-    } catch (error) {
-      console.error('Export reports error:', error);
-      res.status(500).json({
-        error: 'Failed to export reports',
-        code: 'EXPORT_REPORTS_ERROR'
-      });
-    }
-  });
 
   // ========================================
   // PLANNING API ENDPOINTS
@@ -3564,6 +3403,277 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to fetch export options',
         code: 'EXPORT_OPTIONS_ERROR'
       });
+    }
+  });
+
+  // ========================================
+  // PROJECTS API ROUTES
+  // ========================================
+  
+  // GET /api/projects - List projects with stats and filtering
+  app.get('/api/projects', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const validatedQuery = projectsApiQuerySchema.parse(req.query);
+      const result = await storage.getProjectsWithStats(validatedQuery);
+      
+      res.json(result);
+    } catch (error) {
+      console.error('Projects fetch error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid query parameters', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to fetch projects' });
+    }
+  });
+
+  // POST /api/projects - Create new project
+  app.post('/api/projects', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const validatedData = insertProjectSchema.parse({
+        ...req.body,
+        created_by: req.user!.id
+      });
+      
+      const project = await storage.createProject(validatedData);
+      
+      res.status(201).json(project);
+    } catch (error) {
+      console.error('Project creation error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid project data', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to create project' });
+    }
+  });
+
+  // PUT /api/projects/:id - Update project
+  app.put('/api/projects/:id', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.id);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ error: 'Invalid project ID' });
+      }
+
+      const validatedData = updateProjectApiSchema.parse(req.body);
+      const project = await storage.updateProject(projectId, validatedData);
+      
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      
+      res.json(project);
+    } catch (error) {
+      console.error('Project update error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid project data', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to update project' });
+    }
+  });
+
+  // GET /api/projects/:id/members - Get project members
+  app.get('/api/projects/:id/members', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.id);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ error: 'Invalid project ID' });
+      }
+
+      const members = await storage.getProjectMembers(projectId);
+      res.json(members);
+    } catch (error) {
+      console.error('Project members fetch error:', error);
+      res.status(500).json({ error: 'Failed to fetch project members' });
+    }
+  });
+
+  // POST /api/projects/:id/assign - Assign member to project
+  app.post('/api/projects/:id/assign', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.id);
+      if (isNaN(projectId)) {
+        return res.status(400).json({ error: 'Invalid project ID' });
+      }
+
+      const validatedData = assignProjectMemberApiSchema.parse(req.body);
+      const member = await storage.assignProjectMember(projectId, validatedData);
+      
+      res.status(201).json(member);
+    } catch (error) {
+      console.error('Project member assignment error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid assignment data', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to assign project member' });
+    }
+  });
+
+  // ========================================
+  // TASKS API ROUTES
+  // ========================================
+  
+  // GET /api/tasks - List tasks with filtering
+  app.get('/api/tasks', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const validatedQuery = tasksApiQuerySchema.parse(req.query);
+      const result = await storage.getTasksWithFilters(validatedQuery);
+      
+      res.json(result);
+    } catch (error) {
+      console.error('Tasks fetch error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid query parameters', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to fetch tasks' });
+    }
+  });
+
+  // POST /api/tasks - Create new task
+  app.post('/api/tasks', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const validatedData = insertTaskApiSchema.parse({
+        ...req.body,
+        created_by: req.user!.id
+      });
+      
+      const task = await storage.createTaskApi(validatedData);
+      
+      res.status(201).json(task);
+    } catch (error) {
+      console.error('Task creation error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid task data', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to create task' });
+    }
+  });
+
+  // PUT /api/tasks/:id - Update task
+  app.put('/api/tasks/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      if (isNaN(taskId)) {
+        return res.status(400).json({ error: 'Invalid task ID' });
+      }
+
+      const validatedData = updateTaskApiSchema.parse(req.body);
+      const task = await storage.updateTaskApi(taskId, validatedData);
+      
+      if (!task) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+      
+      res.json(task);
+    } catch (error) {
+      console.error('Task update error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid task data', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to update task' });
+    }
+  });
+
+  // PUT /api/tasks/:id/status - Update task status
+  app.put('/api/tasks/:id/status', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      if (isNaN(taskId)) {
+        return res.status(400).json({ error: 'Invalid task ID' });
+      }
+
+      const validatedData = updateTaskStatusApiSchema.parse(req.body);
+      const task = await storage.updateTaskStatus(taskId, validatedData);
+      
+      if (!task) {
+        return res.status(404).json({ error: 'Task not found' });
+      }
+      
+      res.json(task);
+    } catch (error) {
+      console.error('Task status update error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid status data', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to update task status' });
+    }
+  });
+
+  // GET /api/tasks/my - Get current user's tasks
+  app.get('/api/tasks/my', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employee = await storage.getEmployeeByUserId(req.user!.id);
+      if (!employee) {
+        return res.status(404).json({ error: 'Employee profile not found' });
+      }
+
+      const validatedQuery = tasksApiQuerySchema.parse(req.query);
+      const result = await storage.getTasksByEmployeeId(employee.id, validatedQuery);
+      
+      res.json(result);
+    } catch (error) {
+      console.error('My tasks fetch error:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Invalid query parameters', 
+          details: error.errors 
+        });
+      }
+      res.status(500).json({ error: 'Failed to fetch your tasks' });
+    }
+  });
+
+  // ========================================
+  // DASHBOARD API ROUTES
+  // ========================================
+  
+  // GET /api/dashboard/admin - Admin dashboard data
+  app.get('/api/dashboard/admin', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const dashboardData = await storage.getAdminDashboardData();
+      res.json(dashboardData);
+    } catch (error) {
+      console.error('Admin dashboard error:', error);
+      res.status(500).json({ error: 'Failed to fetch admin dashboard data' });
+    }
+  });
+
+  // GET /api/dashboard/employee - Employee dashboard data
+  app.get('/api/dashboard/employee', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employee = await storage.getEmployeeByUserId(req.user!.id);
+      if (!employee) {
+        return res.status(404).json({ error: 'Employee profile not found' });
+      }
+
+      const dashboardData = await storage.getEmployeeDashboardData(employee.id);
+      res.json(dashboardData);
+    } catch (error) {
+      console.error('Employee dashboard error:', error);
+      res.status(500).json({ error: 'Failed to fetch employee dashboard data' });
     }
   });
 

@@ -81,7 +81,8 @@ export class ExportService {
   ): Promise<void> {
     const browser = await puppeteer.launch({ 
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      executablePath: '/usr/bin/chromium',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
     const page = await browser.newPage();
     
@@ -276,7 +277,9 @@ export class ExportService {
     dateTo: string,
     employeeIds?: number[]
   }) {
-    const entries = await this.storage.getPlanningEntries({
+    console.log('DEBUG: fetchPlanningData called with filters:', filters);
+    
+    const planningResult = await this.storage.getPlanningEntries({
       startDate: filters.dateFrom,
       endDate: filters.dateTo,
       employeeId: filters.employeeIds?.[0],
@@ -284,11 +287,26 @@ export class ExportService {
       offset: 0
     });
 
-    return {
-      entries,
+    console.log('DEBUG: planningResult from storage:', {
+      type: typeof planningResult,
+      hasData: !!planningResult.data,
+      dataLength: planningResult.data?.length,
+      firstItem: planningResult.data?.[0]
+    });
+
+    const result = {
+      entries: planningResult.data || [],
       employees: [],
       projects: []
     };
+    
+    console.log('DEBUG: returning from fetchPlanningData:', {
+      entriesType: typeof result.entries,
+      entriesIsArray: Array.isArray(result.entries),
+      entriesLength: result.entries.length
+    });
+
+    return result;
   }
 
   private async fetchTimeEntriesData(filters: {
@@ -297,7 +315,7 @@ export class ExportService {
     employeeIds?: number[],
     projectIds?: number[]
   }) {
-    const entries = await this.storage.getTimeEntries({
+    const timeResult = await this.storage.getTimeEntries({
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,
       employeeId: filters.employeeIds?.[0],
@@ -307,7 +325,7 @@ export class ExportService {
     });
 
     return {
-      entries: entries.data,
+      entries: timeResult.data || [],
       employees: [],
       projects: []
     };
@@ -354,20 +372,33 @@ export class ExportService {
   ): any[][] {
     const companyInfo = this.getCompanyInfo();
     
-    return [
+    console.log('DEBUG: data structure in preparePlanningSummary:', {
+      entriesType: typeof data.entries,
+      entriesIsArray: Array.isArray(data.entries),
+      entriesLength: data.entries?.length,
+      firstEntry: data.entries?.[0]
+    });
+    
+    // Ensure entries is an array
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    
+    const headerRows = [
       [`${companyInfo.name} - Planning Export`],
       [`Période: ${dates.start} au ${dates.end}`],
       [''],
-      ['Date', 'Employé', 'Début', 'Fin', 'Type', 'Statut'],
-      ...data.entries.map(entry => [
-        entry.date,
-        `Employé ${entry.employee_id}`,
-        entry.start_time || 'N/A',
-        entry.end_time || 'N/A',
-        entry.type,
-        entry.status
-      ])
+      ['Date', 'Employé', 'Début', 'Fin', 'Type', 'Statut']
     ];
+    
+    const dataRows = entries.map(entry => [
+      entry.date,
+      `Employé ${entry.employee_id}`,
+      entry.start_time || 'N/A',
+      entry.end_time || 'N/A',
+      entry.type,
+      entry.status
+    ]);
+    
+    return [...headerRows, ...dataRows];
   }
 
   private preparePayrollData(

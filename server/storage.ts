@@ -4,6 +4,7 @@ import {
   departments,
   projects,
   projectAssignments,
+  projectMembers,
   planningEntries,
   timeEntries,
   tasks,
@@ -26,6 +27,15 @@ import {
   type InsertTask,
   type Notification,
   type InsertNotification,
+  type ProjectMember,
+  type InsertProjectMember,
+  type ProjectsApiQueryParams,
+  type TasksApiQueryParams,
+  type AssignProjectMemberApi,
+  type UpdateProjectApi,
+  type InsertTaskApi,
+  type UpdateTaskApi,
+  type UpdateTaskStatusApi,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, like, or, isNull, isNotNull, ilike, count, inArray } from "drizzle-orm";
@@ -192,6 +202,26 @@ export interface IStorage {
   markAllNotificationsAsRead(userId: number): Promise<number>;
   deleteNotification(id: number): Promise<boolean>;
   getUnreadNotificationCount(userId: number): Promise<number>;
+
+  // Projects API
+  getProjectsWithStats(filters?: ProjectsApiQueryParams): Promise<{ projects: any[]; total: number; page: number; totalPages: number; }>;
+  getProject(id: number): Promise<Project | undefined>;
+  createProject(project: InsertProject): Promise<Project>;
+  updateProject(id: number, project: UpdateProjectApi): Promise<Project | undefined>;
+  getProjectMembers(projectId: number): Promise<any[]>;
+  assignProjectMember(projectId: number, data: AssignProjectMemberApi): Promise<ProjectMember>;
+  removeProjectMember(projectId: number, employeeId: number): Promise<boolean>;
+
+  // Tasks API
+  getTasksWithFilters(filters?: TasksApiQueryParams): Promise<{ tasks: any[]; total: number; page: number; totalPages: number; }>;
+  getTasksByEmployeeId(employeeId: number, filters?: Partial<TasksApiQueryParams>): Promise<{ tasks: any[]; total: number; }>;
+  createTaskApi(task: InsertTaskApi): Promise<Task>;
+  updateTaskApi(id: number, task: UpdateTaskApi): Promise<Task | undefined>;
+  updateTaskStatus(id: number, status: UpdateTaskStatusApi): Promise<Task | undefined>;
+
+  // Dashboard Data
+  getAdminDashboardData(): Promise<any>;
+  getEmployeeDashboardData(employeeId: number): Promise<any>;
 }
 
 // ============================================================================
@@ -2438,6 +2468,421 @@ export class DatabaseStorage implements IStorage {
       generatedEntries,
       conflicts,
       warnings
+    };
+  }
+
+  // ========================================
+  // PROJECTS API OPERATIONS
+  // ========================================
+  async getProjectsWithStats(filters: ProjectsApiQueryParams = {}): Promise<{ projects: any[]; total: number; page: number; totalPages: number; }> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let baseQuery = db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        description: projects.description,
+        client_name: projects.client_name,
+        status: projects.status,
+        start_date: projects.start_date,
+        end_date: projects.end_date,
+        budget: projects.budget,
+        hourly_rate: projects.hourly_rate,
+        created_by: projects.created_by,
+        created_at: projects.created_at,
+        updated_at: projects.updated_at,
+        creator_name: sql<string>`CONCAT(${employees.first_name}, ' ', ${employees.last_name})`,
+        tasks_count: sql<number>`COUNT(DISTINCT ${tasks.id})`,
+        active_tasks: sql<number>`COUNT(DISTINCT CASE WHEN ${tasks.status} IN ('todo', 'in_progress') THEN ${tasks.id} END)`,
+        members_count: sql<number>`COUNT(DISTINCT ${projectMembers.employee_id})`
+      })
+      .from(projects)
+      .leftJoin(employees, eq(projects.created_by, employees.id))
+      .leftJoin(tasks, eq(projects.id, tasks.project_id))
+      .leftJoin(projectMembers, eq(projects.id, projectMembers.project_id));
+
+    const conditions = [];
+    
+    if (filters.status) {
+      conditions.push(eq(projects.status, filters.status));
+    }
+    
+    if (filters.client_name) {
+      conditions.push(ilike(projects.client_name, `%${filters.client_name}%`));
+    }
+    
+    if (filters.search) {
+      conditions.push(
+        or(
+          ilike(projects.name, `%${filters.search}%`),
+          ilike(projects.description, `%${filters.search}%`),
+          ilike(projects.client_name, `%${filters.search}%`)
+        )
+      );
+    }
+
+    if (conditions.length > 0) {
+      baseQuery = baseQuery.where(and(...conditions));
+    }
+
+    baseQuery = baseQuery.groupBy(projects.id, employees.first_name, employees.last_name);
+
+    // Apply sorting
+    const sortBy = filters.sortBy || 'created_at';
+    const sortOrder = filters.sortOrder || 'desc';
+    
+    if (sortBy === 'name') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.name) : desc(projects.name));
+    } else if (sortBy === 'status') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.status) : desc(projects.status));
+    } else if (sortBy === 'client_name') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.client_name) : desc(projects.client_name));
+    } else {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.created_at) : desc(projects.created_at));
+    }
+
+    // Get total count
+    const countQuery = db
+      .select({ count: count() })
+      .from(projects)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    
+    const [{ count: total }] = await countQuery;
+    
+    // Get paginated results
+    const projectsData = await baseQuery.limit(limit).offset(offset);
+
+    return {
+      projects: projectsData,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async getProject(id: number): Promise<Project | undefined> {
+    const [project] = await db.select().from(projects).where(eq(projects.id, id));
+    return project || undefined;
+  }
+
+  async createProject(project: InsertProject): Promise<Project> {
+    const [newProject] = await db
+      .insert(projects)
+      .values(project)
+      .returning();
+    return newProject;
+  }
+
+  async updateProject(id: number, project: UpdateProjectApi): Promise<Project | undefined> {
+    const [updatedProject] = await db
+      .update(projects)
+      .set({ ...project, updated_at: new Date() })
+      .where(eq(projects.id, id))
+      .returning();
+    return updatedProject || undefined;
+  }
+
+  async getProjectMembers(projectId: number): Promise<any[]> {
+    return await db
+      .select({
+        id: projectMembers.id,
+        project_id: projectMembers.project_id,
+        employee_id: projectMembers.employee_id,
+        role: projectMembers.role,
+        assigned_at: projectMembers.assigned_at,
+        hourly_rate: projectMembers.hourly_rate,
+        employee_name: sql<string>`CONCAT(${employees.first_name}, ' ', ${employees.last_name})`,
+        employee_email: users.email,
+        department_name: departments.name
+      })
+      .from(projectMembers)
+      .leftJoin(employees, eq(projectMembers.employee_id, employees.id))
+      .leftJoin(users, eq(employees.user_id, users.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id))
+      .where(eq(projectMembers.project_id, projectId))
+      .orderBy(asc(employees.last_name));
+  }
+
+  async assignProjectMember(projectId: number, data: AssignProjectMemberApi): Promise<ProjectMember> {
+    const [member] = await db
+      .insert(projectMembers)
+      .values({
+        project_id: projectId,
+        employee_id: data.employee_id,
+        role: data.role || 'developer',
+        hourly_rate: data.hourly_rate?.toString() || null
+      })
+      .returning();
+    return member;
+  }
+
+  async removeProjectMember(projectId: number, employeeId: number): Promise<boolean> {
+    const result = await db
+      .delete(projectMembers)
+      .where(and(
+        eq(projectMembers.project_id, projectId),
+        eq(projectMembers.employee_id, employeeId)
+      ));
+    return result.rowCount ? result.rowCount > 0 : false;
+  }
+
+  // ========================================
+  // TASKS API OPERATIONS
+  // ========================================
+  async getTasksWithFilters(filters: TasksApiQueryParams = {}): Promise<{ tasks: any[]; total: number; page: number; totalPages: number; }> {
+    const page = filters.page || 1;
+    const limit = filters.limit || 20;
+    const offset = (page - 1) * limit;
+
+    let baseQuery = db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        description: tasks.description,
+        project_id: tasks.project_id,
+        assigned_to: tasks.assigned_to,
+        created_by: tasks.created_by,
+        status: tasks.status,
+        priority: tasks.priority,
+        due_date: tasks.due_date,
+        estimated_hours: tasks.estimated_hours,
+        actual_hours: tasks.actual_hours,
+        completion_percentage: tasks.completion_percentage,
+        tags: tasks.tags,
+        created_at: tasks.created_at,
+        updated_at: tasks.updated_at,
+        project_name: projects.name,
+        assignee_name: sql<string>`CONCAT(${employees.first_name}, ' ', ${employees.last_name})`,
+        creator_name: sql<string>`CONCAT(creator.first_name, ' ', creator.last_name)`
+      })
+      .from(tasks)
+      .leftJoin(projects, eq(tasks.project_id, projects.id))
+      .leftJoin(employees, eq(tasks.assigned_to, employees.id))
+      .leftJoin(employees.as('creator'), eq(tasks.created_by, employees.as('creator').id));
+
+    const conditions = [];
+    
+    if (filters.project_id) {
+      conditions.push(eq(tasks.project_id, filters.project_id));
+    }
+    
+    if (filters.assigned_to) {
+      conditions.push(eq(tasks.assigned_to, filters.assigned_to));
+    }
+    
+    if (filters.status) {
+      conditions.push(eq(tasks.status, filters.status));
+    }
+    
+    if (filters.priority) {
+      conditions.push(eq(tasks.priority, filters.priority));
+    }
+    
+    if (filters.search) {
+      conditions.push(
+        or(
+          ilike(tasks.title, `%${filters.search}%`),
+          ilike(tasks.description, `%${filters.search}%`)
+        )
+      );
+    }
+    
+    if (filters.tags) {
+      const tagArray = filters.tags.split(',').map(tag => tag.trim());
+      conditions.push(sql`${tasks.tags} && ${tagArray}`);
+    }
+    
+    if (filters.due_date_from) {
+      conditions.push(gte(tasks.due_date, filters.due_date_from));
+    }
+    
+    if (filters.due_date_to) {
+      conditions.push(lte(tasks.due_date, filters.due_date_to));
+    }
+
+    if (conditions.length > 0) {
+      baseQuery = baseQuery.where(and(...conditions));
+    }
+
+    // Apply sorting
+    const sortBy = filters.sortBy || 'due_date';
+    const sortOrder = filters.sortOrder || 'asc';
+    
+    if (sortBy === 'title') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(tasks.title) : desc(tasks.title));
+    } else if (sortBy === 'status') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(tasks.status) : desc(tasks.status));
+    } else if (sortBy === 'priority') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(tasks.priority) : desc(tasks.priority));
+    } else if (sortBy === 'due_date') {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(tasks.due_date) : desc(tasks.due_date));
+    } else {
+      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(tasks.created_at) : desc(tasks.created_at));
+    }
+
+    // Get total count
+    const countQuery = db
+      .select({ count: count() })
+      .from(tasks)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    
+    const [{ count: total }] = await countQuery;
+    
+    // Get paginated results
+    const tasksData = await baseQuery.limit(limit).offset(offset);
+
+    return {
+      tasks: tasksData,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
+  async getTasksByEmployeeId(employeeId: number, filters: Partial<TasksApiQueryParams> = {}): Promise<{ tasks: any[]; total: number; }> {
+    const allFilters = { ...filters, assigned_to: employeeId };
+    const result = await this.getTasksWithFilters(allFilters);
+    return {
+      tasks: result.tasks,
+      total: result.total
+    };
+  }
+
+  async createTaskApi(task: InsertTaskApi): Promise<Task> {
+    const [newTask] = await db
+      .insert(tasks)
+      .values(task)
+      .returning();
+    return newTask;
+  }
+
+  async updateTaskApi(id: number, task: UpdateTaskApi): Promise<Task | undefined> {
+    const [updatedTask] = await db
+      .update(tasks)
+      .set({ ...task, updated_at: new Date() })
+      .where(eq(tasks.id, id))
+      .returning();
+    return updatedTask || undefined;
+  }
+
+  async updateTaskStatus(id: number, statusData: UpdateTaskStatusApi): Promise<Task | undefined> {
+    const [updatedTask] = await db
+      .update(tasks)
+      .set({ 
+        status: statusData.status,
+        completion_percentage: statusData.completion_percentage,
+        actual_hours: statusData.actual_hours?.toString(),
+        updated_at: new Date() 
+      })
+      .where(eq(tasks.id, id))
+      .returning();
+    return updatedTask || undefined;
+  }
+
+  // ========================================
+  // DASHBOARD DATA OPERATIONS
+  // ========================================
+  async getAdminDashboardData(): Promise<any> {
+    // Get basic stats
+    const [employeesCount] = await db.select({ count: count() }).from(employees).where(eq(employees.is_active, true));
+    const [projectsCount] = await db.select({ count: count() }).from(projects).where(eq(projects.status, 'active'));
+    const [tasksCount] = await db.select({ count: count() }).from(tasks).where(eq(tasks.status, 'in_progress'));
+    
+    // Get projects by status
+    const projectsByStatus = await db
+      .select({
+        status: projects.status,
+        count: count()
+      })
+      .from(projects)
+      .groupBy(projects.status);
+
+    // Get tasks by priority
+    const tasksByPriority = await db
+      .select({
+        priority: tasks.priority,
+        count: count()
+      })
+      .from(tasks)
+      .where(eq(tasks.status, 'todo'))
+      .groupBy(tasks.priority);
+
+    // Get recent activities (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const recentTimeEntries = await db
+      .select({
+        date: timeEntries.date,
+        total_hours: sql<number>`SUM(${timeEntries.total_hours})`
+      })
+      .from(timeEntries)
+      .where(gte(timeEntries.date, thirtyDaysAgo.toISOString().split('T')[0]))
+      .groupBy(timeEntries.date)
+      .orderBy(asc(timeEntries.date));
+
+    return {
+      stats: {
+        total_employees: employeesCount.count,
+        active_projects: projectsCount.count,
+        active_tasks: tasksCount.count
+      },
+      charts: {
+        projects_by_status: projectsByStatus,
+        tasks_by_priority: tasksByPriority,
+        time_entries_trend: recentTimeEntries
+      }
+    };
+  }
+
+  async getEmployeeDashboardData(employeeId: number): Promise<any> {
+    // Get employee's tasks
+    const myTasks = await db
+      .select({
+        status: tasks.status,
+        count: count()
+      })
+      .from(tasks)
+      .where(eq(tasks.assigned_to, employeeId))
+      .groupBy(tasks.status);
+
+    // Get employee's projects
+    const myProjects = await db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        status: projects.status,
+        tasks_count: sql<number>`COUNT(${tasks.id})`
+      })
+      .from(projectMembers)
+      .leftJoin(projects, eq(projectMembers.project_id, projects.id))
+      .leftJoin(tasks, and(eq(tasks.project_id, projects.id), eq(tasks.assigned_to, employeeId)))
+      .where(eq(projectMembers.employee_id, employeeId))
+      .groupBy(projects.id, projects.name, projects.status);
+
+    // Get recent time entries (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recentTimeEntries = await db
+      .select({
+        date: timeEntries.date,
+        total_hours: sql<number>`SUM(${timeEntries.total_hours})`
+      })
+      .from(timeEntries)
+      .where(and(
+        eq(timeEntries.employee_id, employeeId),
+        gte(timeEntries.date, sevenDaysAgo.toISOString().split('T')[0])
+      ))
+      .groupBy(timeEntries.date)
+      .orderBy(asc(timeEntries.date));
+
+    return {
+      my_tasks: myTasks,
+      my_projects: myProjects,
+      recent_time_entries: recentTimeEntries
     };
   }
 }

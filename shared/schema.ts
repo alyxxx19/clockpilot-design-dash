@@ -440,6 +440,24 @@ export const validationsRelations = relations(validations, ({ one }) => ({
 }));
 
 // ============================================================================
+// PROJECT-TASK MEMBER ASSIGNMENTS
+// ============================================================================
+export const projectMembers = pgTable("project_members", {
+  id: serial("id").primaryKey(),
+  project_id: integer("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  employee_id: integer("employee_id").references(() => employees.id, { onDelete: "cascade" }).notNull(),
+  role: text("role", { 
+    enum: ['manager', 'developer', 'designer', 'tester', 'analyst'] 
+  }).notNull().default('developer'),
+  assigned_at: timestamp("assigned_at").defaultNow().notNull(),
+  hourly_rate: decimal("hourly_rate", { precision: 10, scale: 2 }),
+}, (table) => ({
+  projectIdx: index("project_members_project_idx").on(table.project_id),
+  employeeIdx: index("project_members_employee_idx").on(table.employee_id),
+  uniqueProjectEmployee: index("project_members_unique_idx").on(table.project_id, table.employee_id),
+}));
+
+// ============================================================================
 // ZOD SCHEMAS FOR VALIDATION
 // ============================================================================
 
@@ -871,6 +889,76 @@ export const TaskPriority = {
   HIGH: 'high',
   URGENT: 'urgent',
 } as const;
+
+// ============================================================================
+// NEW API SCHEMAS FOR PROJECTS AND TASKS
+// ============================================================================
+
+// Projects API schemas
+export const projectsApiQuerySchema = z.object({
+  status: z.enum(['active', 'completed', 'paused', 'cancelled']).optional(),
+  client_name: z.string().optional(),
+  search: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+  page: z.string().transform(Number).optional(),
+  limit: z.string().transform(Number).optional(),
+});
+
+export const assignProjectMemberApiSchema = z.object({
+  employee_id: z.number(),
+  role: z.enum(['manager', 'developer', 'designer', 'tester', 'analyst']).optional(),
+  hourly_rate: z.number().optional(),
+});
+
+export const updateProjectApiSchema = insertProjectSchema.partial();
+
+// Tasks API schemas  
+export const tasksApiQuerySchema = z.object({
+  project_id: z.string().transform(Number).optional(),
+  assigned_to: z.string().transform(Number).optional(),
+  status: z.enum(['todo', 'in_progress', 'completed', 'cancelled']).optional(),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+  search: z.string().optional(),
+  tags: z.string().optional(), // comma-separated tags
+  due_date_from: z.string().optional(),
+  due_date_to: z.string().optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+  page: z.string().transform(Number).optional(),
+  limit: z.string().transform(Number).optional(),
+});
+
+export const updateTaskStatusApiSchema = z.object({
+  status: z.enum(['todo', 'in_progress', 'completed', 'cancelled']),
+  completion_percentage: z.number().min(0).max(100).optional(),
+  actual_hours: z.number().positive().optional(),
+});
+
+export const insertTaskApiSchema = createInsertSchema(tasks, {
+  due_date: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+}).omit({ 
+  id: true, 
+  created_at: true, 
+  updated_at: true 
+});
+
+export const updateTaskApiSchema = insertTaskApiSchema.partial();
+
+// Type exports for new API schemas
+export type ProjectsApiQueryParams = z.infer<typeof projectsApiQuerySchema>;
+export type AssignProjectMemberApi = z.infer<typeof assignProjectMemberApiSchema>;
+export type UpdateProjectApi = z.infer<typeof updateProjectApiSchema>;
+
+export type TasksApiQueryParams = z.infer<typeof tasksApiQuerySchema>;
+export type UpdateTaskStatusApi = z.infer<typeof updateTaskStatusApiSchema>;
+export type InsertTaskApi = z.infer<typeof insertTaskApiSchema>;
+export type UpdateTaskApi = z.infer<typeof updateTaskApiSchema>;
+
+// Project member type
+export type ProjectMember = typeof projectMembers.$inferSelect;
+export type InsertProjectMember = typeof projectMembers.$inferInsert;
 
 export const ValidationStatus = {
   PENDING: 'pending',
