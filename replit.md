@@ -50,3 +50,11 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **Axios**: HTTP client for API requests.
 - **bcrypt**: For password hashing.
 - **Zod**: For schema validation.
+
+## Testing Infrastructure (2024-08-03)
+- **Jest**: Primary testing framework with multi-project setup for backend/frontend separation
+- **React Testing Library**: Frontend component and integration testing
+- **Supertest**: Backend API integration testing
+- **MSW (Mock Service Worker)**: API mocking for frontend tests
+- **Coverage**: Comprehensive test suite targeting 70% minimum coverage across all critical paths
+- **Test Categories**: Authentication, business logic, API integration, component interaction, user workflows
