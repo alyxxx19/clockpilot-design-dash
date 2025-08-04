@@ -259,9 +259,36 @@ const validateRequest = (schema: z.ZodSchema) => {
 // ============================================================================
 export async function registerRoutes(app: Express): Promise<Server> {
   
+  // ============================================================================
+  // PRODUCTION MIDDLEWARE & SECURITY SETUP
+  // ============================================================================
+  
+  // Apply security middleware in production
+  if (process.env.NODE_ENV === 'production') {
+    app.use(securityMiddleware);
+    app.use(compressionMiddleware);
+    app.use(timeoutMiddleware());
+    app.use(securityAuditMiddleware);
+  }
+  
+  // Always apply metrics and health monitoring
+  app.use(metricsMiddleware);
+  setupHealthRoutes(app);
+  
   // ========================================
-  // AUTH ENDPOINTS
+  // AUTH ENDPOINTS - Rate Limited
   // ========================================
+  
+  // Apply auth rate limiting to authentication endpoints
+  app.use('/api/auth', authRateLimit);
+  
+  // Apply API rate limiting to general API endpoints
+  app.use('/api', apiRateLimit);
+  
+  // Apply strict rate limiting to sensitive operations
+  app.use('/api/employees/bulk', strictRateLimit);
+  app.use('/api/planning/bulk', strictRateLimit);
+  app.use('/api/time-entries/bulk', strictRateLimit);
 
   // POST /api/auth/register
   app.post('/api/auth/register', validateRequest(registerSchema), async (req: Request, res: Response) => {
