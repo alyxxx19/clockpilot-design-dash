@@ -274,21 +274,30 @@ export const notificationPriorityEnum = pgEnum("notification_priority", [
 // Notifications table
 export const notifications = pgTable("notifications", {
   id: serial("id").primaryKey(),
-  user_id: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  user_id: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   type: notificationTypeEnum("type").notNull(),
-  title: varchar("title", { length: 255 }).notNull(),
-  message: text("message").notNull(),
-  data: jsonb("data"), // Additional structured data
-  action_url: varchar("action_url", { length: 512 }),
   priority: notificationPriorityEnum("priority").notNull().default("medium"),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  action_url: text("action_url"),
+  data: json("data"), // Additional contextual data
+  is_read: boolean("is_read").default(false).notNull(),
   read_at: timestamp("read_at"),
   created_at: timestamp("created_at").defaultNow().notNull(),
+  updated_at: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
-  userIdIdx: index("notifications_user_id_idx").on(table.user_id),
-  createdAtIdx: index("notifications_created_at_idx").on(table.created_at),
-  readAtIdx: index("notifications_read_at_idx").on(table.read_at),
+  userIdx: index("notifications_user_idx").on(table.user_id),
   typeIdx: index("notifications_type_idx").on(table.type),
   priorityIdx: index("notifications_priority_idx").on(table.priority),
+  isReadIdx: index("notifications_is_read_idx").on(table.is_read),
+  createdAtIdx: index("notifications_created_at_idx").on(table.created_at),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, {
+    fields: [notifications.user_id],
+    references: [users.id],
+  }),
 }));
 
 // ============================================================================
@@ -427,13 +436,6 @@ export const validationsRelations = relations(validations, ({ one }) => ({
     fields: [validations.validated_by],
     references: [employees.id],
     relationName: "validator",
-  }),
-}));
-
-export const notificationsRelations = relations(notifications, ({ one }) => ({
-  user: one(users, {
-    fields: [notifications.user_id],
-    references: [users.id],
   }),
 }));
 
@@ -670,9 +672,9 @@ export const createNotificationSchema = z.object({
   type: z.enum(['task_assigned', 'planning_modified', 'validation_required', 'time_missing', 'overtime_alert', 'schedule_conflict', 'system_update', 'reminder']),
   title: z.string().min(1).max(255),
   message: z.string().min(1),
-  data: z.record(z.any()).optional(),
-  action_url: z.string().max(512).optional(),
+  action_url: z.string().optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
+  data: z.record(z.any()).optional(),
 });
 
 export const notificationQuerySchema = z.object({
@@ -680,13 +682,14 @@ export const notificationQuerySchema = z.object({
   limit: z.string().transform(val => parseInt(val) || 20).pipe(z.number().int().min(1).max(100)).optional(),
   type: z.enum(['task_assigned', 'planning_modified', 'validation_required', 'time_missing', 'overtime_alert', 'schedule_conflict', 'system_update', 'reminder']).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
-  read: z.enum(['true', 'false']).optional(),
-  sort_by: z.enum(['created_at', 'priority', 'read_at']).default('created_at'),
-  sort_order: z.enum(['asc', 'desc']).default('desc'),
+  is_read: z.string().transform(val => val === 'true').pipe(z.boolean()).optional(),
+  sortBy: z.enum(['created_at', 'priority', 'type']).default('created_at'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export const markReadSchema = z.object({
-  read: z.boolean().default(true),
+  notification_ids: z.array(z.number().int().positive()).optional(),
+  mark_all: z.boolean().default(false),
 });
 
 // Tasks API schemas
@@ -711,6 +714,8 @@ export const tasksQuerySchema = z.object({
 export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = typeof notifications.$inferInsert;
 export type CreateNotification = z.infer<typeof createNotificationSchema>;
+
+// Already exported above at line 719
 
 // Departments schemas
 export const insertDepartmentSchema = createInsertSchema(departments).omit({

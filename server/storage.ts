@@ -130,10 +130,24 @@ export interface IStorage {
   calculateOvertimeHours(employeeId: number, date: string, totalHours: number): Promise<{ regularHours: number; overtimeHours: number }>;
   submitWeeklyTimeEntries(employeeId: number, weekStart: string): Promise<{ submitted: number; errors: string[] }>;
   
+  // French labor law validation methods
+  validateDailyHours(employeeId: number, date: string, totalHours: number): Promise<{ valid: boolean; errors: string[] }>;
+  validateWeeklyHours(employeeId: number, weekStart: string, totalHours: number): Promise<{ valid: boolean; errors: string[] }>;
+  validateRestPeriod(employeeId: number, date: string, startTime: string): Promise<{ valid: boolean; errors: string[] }>;
+  
   // Time comparison and analysis
   compareTimeWithPlanning(employeeId: number, dateFrom: string, dateTo: string): Promise<any>;
   detectTimeAnomalies(employeeId: number, dateFrom?: string, dateTo?: string): Promise<any[]>;
   getTimeEntriesSummary(employeeId?: number, period?: string): Promise<any>;
+
+  // Notifications operations
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getNotifications(userId: number, page?: number, limit?: number, type?: string, priority?: string): Promise<{ data: Notification[]; total: number; page: number; totalPages: number }>;
+  getNotification(id: number): Promise<Notification | undefined>;
+  markNotificationAsRead(id: number): Promise<boolean>;
+  markAllNotificationsAsRead(userId: number): Promise<number>;
+  deleteNotification(id: number): Promise<boolean>;
+  getUnreadNotificationCount(userId: number): Promise<number>;
 
   // Departments
   getDepartment(id: number): Promise<Department | undefined>;
@@ -1127,6 +1141,146 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
+  // NOTIFICATIONS OPERATIONS 
+  // ========================================
+  
+  async getNotifications(
+    userId: number, 
+    page: number = 1, 
+    limit: number = 20, 
+    type?: string, 
+    priority?: string
+  ): Promise<{ data: Notification[]; total: number; page: number; totalPages: number; }> {
+    const offset = (page - 1) * limit;
+    const conditions = [eq(notifications.user_id, userId)];
+    
+    if (type) {
+      conditions.push(eq(notifications.type, type as any));
+    }
+    if (priority) {
+      conditions.push(eq(notifications.priority, priority as any));
+    }
+
+    const [notificationList, totalCountResult] = await Promise.all([
+      db.select()
+        .from(notifications)
+        .where(and(...conditions))
+        .orderBy(desc(notifications.created_at))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: sql<number>`count(*)` })
+        .from(notifications)
+        .where(and(...conditions))
+    ]);
+
+    const total = totalCountResult[0]?.count || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: notificationList,
+      total,
+      page,
+      totalPages
+    };
+  }
+
+  async getNotification(id: number): Promise<Notification | undefined> {
+    const [notification] = await db.select().from(notifications).where(eq(notifications.id, id));
+    return notification || undefined;
+  }
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const [newNotification] = await db
+      .insert(notifications)
+      .values(notification)
+      .returning();
+    return newNotification;
+  }
+
+  async getUnreadNotificationCount(userId: number): Promise<number> {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(notifications)
+      .where(and(
+        eq(notifications.user_id, userId),
+        eq(notifications.is_read, false)
+      ));
+    return result?.count || 0;
+  }
+
+  async markNotificationAsRead(id: number): Promise<boolean> {
+    const [updated] = await db
+      .update(notifications)
+      .set({ 
+        is_read: true, 
+        read_at: new Date(),
+        updated_at: new Date()
+      })
+      .where(eq(notifications.id, id))
+      .returning();
+    return !!updated;
+  }
+
+  async markAllNotificationsAsRead(userId: number): Promise<number> {
+    const result = await db
+      .update(notifications)
+      .set({ 
+        is_read: true, 
+        read_at: new Date(),
+        updated_at: new Date()
+      })
+      .where(and(
+        eq(notifications.user_id, userId),
+        eq(notifications.is_read, false)
+      ));
+    
+    return result.rowCount || 0;
+  }
+
+  async deleteNotification(id: number): Promise<boolean> {
+    const result = await db
+      .delete(notifications)
+      .where(eq(notifications.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  async getNotificationsByUser(
+    userId: number, 
+    filters?: { page?: number; limit?: number; type?: string; read?: boolean; }
+  ): Promise<{ notifications: Notification[]; total: number; }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+    const conditions = [eq(notifications.user_id, userId)];
+    
+    if (filters?.type) {
+      conditions.push(eq(notifications.type, filters.type as any));
+    }
+    if (filters?.read !== undefined) {
+      conditions.push(eq(notifications.is_read, filters.read));
+    }
+
+    const [notificationList, totalCountResult] = await Promise.all([
+      db.select()
+        .from(notifications)
+        .where(and(...conditions))
+        .orderBy(desc(notifications.created_at))
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: sql<number>`count(*)` })
+        .from(notifications)
+        .where(and(...conditions))
+    ]);
+
+    const total = totalCountResult[0]?.count || 0;
+
+    return {
+      notifications: notificationList,
+      total
+    };
+  }
+
+  // ========================================
   // TIME ENTRIES
   // ========================================
 
@@ -1569,6 +1723,415 @@ export class DatabaseStorage implements IStorage {
     return {
       valid: conflicts.length === 0,
       conflicts
+    };
+  }
+
+  calculateWorkingHours(startTime: string, endTime: string, breakDuration: number = 0): number {
+    const start = new Date(`1970-01-01T${startTime}:00`);
+    const end = new Date(`1970-01-01T${endTime}:00`);
+    const diffMs = end.getTime() - start.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    return Math.max(0, diffHours - (breakDuration / 60)); // breakDuration en minutes
+  }
+
+  async calculateOvertimeHours(
+    employeeId: number, 
+    date: string, 
+    totalHours: number
+  ): Promise<{ regularHours: number; overtimeHours: number }> {
+    const employee = await this.getEmployee(employeeId);
+    if (!employee) {
+      return { regularHours: totalHours, overtimeHours: 0 };
+    }
+
+    // French law: max 10h/day, 35h/week standard
+    const maxDailyHours = 10;
+    const standardDailyHours = employee.weekly_hours / 5; // Assume 5-day work week
+
+    let regularHours = Math.min(totalHours, standardDailyHours);
+    let overtimeHours = Math.max(0, totalHours - standardDailyHours);
+
+    // Cap at legal maximum
+    if (totalHours > maxDailyHours) {
+      regularHours = Math.min(regularHours, maxDailyHours);
+      overtimeHours = Math.min(overtimeHours, maxDailyHours - regularHours);
+    }
+
+    return { regularHours, overtimeHours };
+  }
+
+  async validateDailyHours(
+    employeeId: number, 
+    date: string, 
+    totalHours: number
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    const maxDailyHours = 10; // French labor law
+
+    if (totalHours > maxDailyHours) {
+      errors.push(`Maximum daily hours exceeded: ${totalHours}h > ${maxDailyHours}h`);
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  async validateWeeklyHours(
+    employeeId: number, 
+    weekStart: string, 
+    additionalHours: number
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    const maxWeeklyHours = 48; // French labor law
+    
+    // Get existing hours for the week
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    
+    const existingEntries = await this.getTimeEntries({
+      employeeId,
+      dateFrom: weekStart,
+      dateTo: weekEnd.toISOString().split('T')[0],
+      limit: 100,
+      offset: 0
+    });
+
+    const currentWeeklyHours = existingEntries.data.reduce((total, entry) => {
+      if (entry.endTime) {
+        return total + this.calculateWorkingHours(entry.startTime, entry.endTime, entry.breakDuration || 0);
+      }
+      return total;
+    }, 0);
+
+    const totalWeeklyHours = currentWeeklyHours + additionalHours;
+
+    if (totalWeeklyHours > maxWeeklyHours) {
+      errors.push(`Maximum weekly hours exceeded: ${totalWeeklyHours}h > ${maxWeeklyHours}h`);
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  async validateRestPeriod(
+    employeeId: number, 
+    date: string, 
+    startTime: string
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    const minRestHours = 11; // French labor law: 11h rest between shifts
+
+    // Get previous day's last entry
+    const previousDate = new Date(date);
+    previousDate.setDate(previousDate.getDate() - 1);
+    
+    const previousEntries = await this.getTimeEntries({
+      employeeId,
+      dateFrom: previousDate.toISOString().split('T')[0],
+      dateTo: previousDate.toISOString().split('T')[0],
+      limit: 50,
+      offset: 0
+    });
+
+    if (previousEntries.data.length > 0) {
+      // Find the latest end time from previous day
+      const lastEntry = previousEntries.data
+        .filter(entry => entry.endTime)
+        .sort((a, b) => b.endTime.localeCompare(a.endTime))[0];
+
+      if (lastEntry) {
+        const lastEndTime = new Date(`${previousDate.toISOString().split('T')[0]}T${lastEntry.endTime}:00`);
+        const currentStartTime = new Date(`${date}T${startTime}:00`);
+        
+        const restHours = (currentStartTime.getTime() - lastEndTime.getTime()) / (1000 * 60 * 60);
+        
+        if (restHours < minRestHours) {
+          errors.push(`Insufficient rest period: ${restHours.toFixed(1)}h < ${minRestHours}h required`);
+        }
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  calculateWorkingHours(startTime: string, endTime: string, breakDuration: number = 0): number {
+    const start = new Date(`1970-01-01T${startTime}:00`);
+    const end = new Date(`1970-01-01T${endTime}:00`);
+    const diffMs = end.getTime() - start.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    return Math.max(0, diffHours - (breakDuration / 60)); // breakDuration en minutes
+  }
+
+  async calculateOvertimeHours(
+    employeeId: number, 
+    date: string, 
+    totalHours: number
+  ): Promise<{ regularHours: number; overtimeHours: number }> {
+    const employee = await this.getEmployee(employeeId);
+    if (!employee) {
+      return { regularHours: totalHours, overtimeHours: 0 };
+    }
+
+    // French law: max 10h/day, 35h/week standard
+    const maxDailyHours = 10;
+    const standardDailyHours = employee.weekly_hours / 5; // Assume 5-day work week
+
+    let regularHours = Math.min(totalHours, standardDailyHours);
+    let overtimeHours = Math.max(0, totalHours - standardDailyHours);
+
+    // Cap at legal maximum
+    if (totalHours > maxDailyHours) {
+      regularHours = Math.min(regularHours, maxDailyHours);
+      overtimeHours = Math.min(overtimeHours, maxDailyHours - regularHours);
+    }
+
+    return { regularHours, overtimeHours };
+  }
+
+  async validateDailyHours(
+    employeeId: number, 
+    date: string, 
+    totalHours: number
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    const maxDailyHours = 10; // French labor law
+
+    if (totalHours > maxDailyHours) {
+      errors.push(`Maximum daily hours exceeded: ${totalHours}h > ${maxDailyHours}h`);
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  async validateWeeklyHours(
+    employeeId: number, 
+    weekStart: string, 
+    additionalHours: number
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    const maxWeeklyHours = 48; // French labor law
+    
+    // Get existing hours for the week
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    
+    const existingEntries = await this.getTimeEntries({
+      employeeId,
+      dateFrom: weekStart,
+      dateTo: weekEnd.toISOString().split('T')[0],
+      limit: 100,
+      offset: 0
+    });
+
+    const currentWeeklyHours = existingEntries.data.reduce((total, entry) => {
+      if (entry.endTime) {
+        return total + this.calculateWorkingHours(entry.startTime, entry.endTime, entry.breakDuration || 0);
+      }
+      return total;
+    }, 0);
+
+    const totalWeeklyHours = currentWeeklyHours + additionalHours;
+
+    if (totalWeeklyHours > maxWeeklyHours) {
+      errors.push(`Maximum weekly hours exceeded: ${totalWeeklyHours}h > ${maxWeeklyHours}h`);
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  async validateRestPeriod(
+    employeeId: number, 
+    date: string, 
+    startTime: string
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    const minRestHours = 11; // French labor law: 11h rest between shifts
+
+    // Get previous day's last entry
+    const previousDate = new Date(date);
+    previousDate.setDate(previousDate.getDate() - 1);
+    
+    const previousEntries = await this.getTimeEntries({
+      employeeId,
+      dateFrom: previousDate.toISOString().split('T')[0],
+      dateTo: previousDate.toISOString().split('T')[0],
+      limit: 50,
+      offset: 0
+    });
+
+    if (previousEntries.data.length > 0) {
+      // Find the latest end time from previous day
+      const lastEntry = previousEntries.data
+        .filter(entry => entry.endTime)
+        .sort((a, b) => b.endTime.localeCompare(a.endTime))[0];
+
+      if (lastEntry) {
+        const lastEndTime = new Date(`${previousDate.toISOString().split('T')[0]}T${lastEntry.endTime}:00`);
+        const currentStartTime = new Date(`${date}T${startTime}:00`);
+        
+        const restHours = (currentStartTime.getTime() - lastEndTime.getTime()) / (1000 * 60 * 60);
+        
+        if (restHours < minRestHours) {
+          errors.push(`Insufficient rest period: ${restHours.toFixed(1)}h < ${minRestHours}h required`);
+        }
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
+  // ========================================
+  // NOTIFICATIONS
+  // ========================================
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const [created] = await db
+      .insert(notifications)
+      .values(notification)
+      .returning();
+    return created;
+  }
+
+  async getNotifications(params: {
+    userId: number;
+    type?: string;
+    priority?: string;
+    isRead?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ data: Notification[]; total: number }> {
+    const { userId, type, priority, isRead, limit = 20, offset = 0 } = params;
+
+    const conditions: any[] = [eq(notifications.user_id, userId)];
+    
+    if (type) conditions.push(eq(notifications.type, type as any));
+    if (priority) conditions.push(eq(notifications.priority, priority as any));
+    if (isRead !== undefined) conditions.push(eq(notifications.is_read, isRead));
+
+    let query = db
+      .select()
+      .from(notifications)
+      .where(and(...conditions))
+      .orderBy(desc(notifications.created_at));
+
+    const data = await query.limit(limit).offset(offset);
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(notifications)
+      .where(and(...conditions));
+
+    return { data, total: count };
+  }
+
+  async markNotificationAsRead(notificationId: number): Promise<boolean> {
+    const [updated] = await db
+      .update(notifications)
+      .set({ 
+        is_read: true, 
+        read_at: new Date(),
+        updated_at: new Date()
+      })
+      .where(eq(notifications.id, notificationId))
+      .returning();
+    
+    return !!updated;
+  }
+
+  async markAllNotificationsAsRead(userId: number): Promise<number> {
+    const result = await db
+      .update(notifications)
+      .set({ 
+        is_read: true, 
+        read_at: new Date(),
+        updated_at: new Date()
+      })
+      .where(
+        and(
+          eq(notifications.user_id, userId),
+          eq(notifications.is_read, false)
+        )
+      );
+    
+    return result.rowCount || 0;
+  }
+
+  async getUnreadNotificationCount(userId: number): Promise<number> {
+    const [{ count }] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.user_id, userId),
+          eq(notifications.is_read, false)
+        )
+      );
+    
+    return count;
+  }
+
+  async deleteNotification(notificationId: number): Promise<boolean> {
+    const [deleted] = await db
+      .delete(notifications)
+      .where(eq(notifications.id, notificationId))
+      .returning();
+    
+    return !!deleted;
+  }
+
+  // Notifications - remove duplicates, keeping the first implementation above
+
+  async getNotificationsByUser(
+    userId: number, 
+    filters?: { page?: number; limit?: number; type?: string; read?: boolean }
+  ): Promise<{ notifications: Notification[]; total: number }> {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 20;
+    const offset = (page - 1) * limit;
+    
+    const whereConditions = [eq(notifications.user_id, userId)];
+    
+    if (filters?.type) {
+      whereConditions.push(eq(notifications.type, filters.type as any));
+    }
+    
+    if (filters?.read !== undefined) {
+      whereConditions.push(eq(notifications.is_read, filters.read));
+    }
+
+    const [data, totalResult] = await Promise.all([
+      db.select()
+        .from(notifications)
+        .where(and(...whereConditions))
+        .orderBy(desc(notifications.created_at))
+        .limit(limit)
+        .offset(offset),
+      
+      db.select({ count: sql<number>`COUNT(*)` })
+        .from(notifications)
+        .where(and(...whereConditions))
+    ]);
+
+    return {
+      notifications: data,
+      total: totalResult[0]?.count || 0
     };
   }
 
