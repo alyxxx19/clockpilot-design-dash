@@ -110,3 +110,11 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **API Integration**: Full integration with existing backend endpoints /api/time-entries/clock-in and /api/time-entries/clock-out with proper error handling
 - **Offline Capabilities**: localStorage-based pending actions queue, automatic synchronization when online, user feedback for offline operations
 - **Navigation Integration**: Added "Pointage temps réel" link in employee dashboard navigation with Timer icon
+
+## Marketing Landing Page (2025-01-04)
+- **Modern Landing Page**: Complete marketing landing page implemented in Next.js 14 App Router (app/page.tsx)
+- **Professional Design**: Hero section with gradient backgrounds, animated CTAs, and modern UI using Tailwind CSS and Framer Motion
+- **Content Sections**: Hero with value proposition, problems solved (3 cards), features showcase (6 features grid), customer testimonials (3 testimonials), pricing plans (3 tiers), and final CTA with email capture
+- **Interactive Elements**: Animated scroll effects using Framer Motion, hover animations, responsive design, email capture form
+- **Conversion Optimization**: Clear CTAs leading to /register and /login, demo booking integration with Calendly, pricing transparency with 14-day free trial
+- **Brand Identity**: ClockPilot branding with blue gradient theme, professional French content, compliance focus for French market

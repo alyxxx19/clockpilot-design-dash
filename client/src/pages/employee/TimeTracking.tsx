@@ -264,13 +264,15 @@ export default function TimeTracking() {
   const calculateWorkedTime = () => {
     let totalMinutes = 0;
     
-    todayEntries.forEach((entry: TimeEntry) => {
-      if (entry.clockIn && entry.type === 'work') {
-        const clockInTime = new Date(entry.clockIn);
-        const clockOutTime = entry.clockOut ? new Date(entry.clockOut) : currentTime;
-        totalMinutes += differenceInMinutes(clockOutTime, clockInTime);
-      }
-    });
+    if (Array.isArray(todayEntries)) {
+      todayEntries.forEach((entry: TimeEntry) => {
+        if (entry.clockIn && entry.type === 'work') {
+          const clockInTime = new Date(entry.clockIn);
+          const clockOutTime = entry.clockOut ? new Date(entry.clockOut) : currentTime;
+          totalMinutes += differenceInMinutes(clockOutTime, clockInTime);
+        }
+      });
+    }
 
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
@@ -472,7 +474,7 @@ export default function TimeTracking() {
                 Chargement...
               </p>
             </div>
-          ) : todayEntries.length === 0 ? (
+          ) : !Array.isArray(todayEntries) || todayEntries.length === 0 ? (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
               <History className="h-12 w-12 mx-auto mb-2 opacity-50" />
               <p>Aucun pointage aujourd'hui</p>
