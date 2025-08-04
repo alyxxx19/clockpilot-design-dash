@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import { format, differenceInMinutes, startOfDay, isToday } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { OfflineIndicator, useOfflineStatus } from '@/components/OfflineIndicator';
 
 interface TimeEntry {
   id: number;
@@ -48,12 +49,11 @@ interface GeolocationData {
 export default function TimeTracking() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const offlineStatus = useOfflineStatus();
   
   // State management
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [geolocation, setGeolocation] = useState<GeolocationData | null>(null);
-  const [pendingActions, setPendingActions] = useState<any[]>([]);
 
   // Update current time every second
   useEffect(() => {
@@ -61,23 +61,6 @@ export default function TimeTracking() {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
-
-  // Monitor online/offline status
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      syncPendingActions();
-    };
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
   }, []);
 
   // Get geolocation on component mount
@@ -97,55 +80,6 @@ export default function TimeTracking() {
     }
   }, []);
 
-  // Load pending actions from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem('clockpilot_pending_actions');
-    if (stored) {
-      setPendingActions(JSON.parse(stored));
-    }
-  }, []);
-
-  // Sync pending actions when back online
-  const syncPendingActions = async () => {
-    if (pendingActions.length === 0) return;
-
-    try {
-      for (const action of pendingActions) {
-        if (action.type === 'clock-in') {
-          await apiRequest('/api/time-entries/clock-in', {
-            method: 'POST',
-            body: action.data,
-          });
-        } else if (action.type === 'clock-out') {
-          await apiRequest('/api/time-entries/clock-out', {
-            method: 'POST',
-            body: action.data,
-          });
-        }
-      }
-      
-      // Clear pending actions
-      setPendingActions([]);
-      localStorage.removeItem('clockpilot_pending_actions');
-      
-      // Refresh data
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries/current'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/time-entries/today'] });
-      
-      toast({
-        title: "Synchronisation réussie",
-        description: `${pendingActions.length} action(s) synchronisée(s)`,
-        variant: "default",
-      });
-    } catch (error) {
-      toast({
-        title: "Erreur de synchronisation",
-        description: "Impossible de synchroniser certaines actions",
-        variant: "destructive",
-      });
-    }
-  };
-
   // Fetch current active time entry
   const { data: currentEntry, isLoading: currentLoading } = useQuery<TimeEntry>({
     queryKey: ['/api/time-entries/current'],
@@ -154,7 +88,7 @@ export default function TimeTracking() {
       return response.data;
     },
     retry: false,
-    enabled: isOnline
+    enabled: offlineStatus.isOnline
   });
 
   // Fetch today's time entries
@@ -165,18 +99,20 @@ export default function TimeTracking() {
       return response.data;
     },
     retry: false,
-    enabled: isOnline
+    enabled: offlineStatus.isOnline
   });
 
   // Clock in mutation
   const clockInMutation = useMutation({
     mutationFn: async (data: ClockInRequest) => {
-      if (!isOnline) {
-        // Store action for later sync
-        const action = { type: 'clock-in', data, timestamp: new Date().toISOString() };
-        const newPending = [...pendingActions, action];
-        setPendingActions(newPending);
-        localStorage.setItem('clockpilot_pending_actions', JSON.stringify(newPending));
+      if (!offlineStatus.isOnline) {
+        // Store action for offline sync
+        await offlineStatus.syncManager.addToQueue(
+          'clock-in',
+          data,
+          '/api/time-entries/clock-in',
+          'POST'
+        );
         return { success: true, offline: true };
       }
       
@@ -217,12 +153,14 @@ export default function TimeTracking() {
   // Clock out mutation
   const clockOutMutation = useMutation({
     mutationFn: async (data: ClockOutRequest) => {
-      if (!isOnline) {
-        // Store action for later sync
-        const action = { type: 'clock-out', data, timestamp: new Date().toISOString() };
-        const newPending = [...pendingActions, action];
-        setPendingActions(newPending);
-        localStorage.setItem('clockpilot_pending_actions', JSON.stringify(newPending));
+      if (!offlineStatus.isOnline) {
+        // Store action for offline sync
+        await offlineStatus.syncManager.addToQueue(
+          'clock-out',
+          data,
+          '/api/time-entries/clock-out',
+          'POST'
+        );
         return { success: true, offline: true };
       }
       
@@ -305,14 +243,19 @@ export default function TimeTracking() {
 
   return (
     <div className="container mx-auto p-4 space-y-6 max-w-4xl">
-      {/* Header */}
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-          Pointage Temps Réel
-        </h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          {formatDate(currentTime)}
-        </p>
+      {/* Header avec indicateur hors ligne */}
+      <div className="flex items-center justify-between">
+        <div className="text-center flex-1">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+            Pointage Temps Réel
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            {formatDate(currentTime)}
+          </p>
+        </div>
+        <div className="ml-4">
+          <OfflineIndicator />
+        </div>
       </div>
 
       {/* Status Cards */}
@@ -378,26 +321,8 @@ export default function TimeTracking() {
       <Card className="shadow-lg">
         <CardContent className="p-8">
           <div className="text-center space-y-6">
-            {/* Connection Status */}
-            <div className="flex items-center justify-center gap-2">
-              {isOnline ? (
-                <>
-                  <Wifi className="h-5 w-5 text-green-600" />
-                  <span className="text-sm text-green-600">En ligne</span>
-                </>
-              ) : (
-                <>
-                  <WifiOff className="h-5 w-5 text-orange-600" />
-                  <span className="text-sm text-orange-600">Hors ligne</span>
-                </>
-              )}
-              
-              {pendingActions.length > 0 && (
-                <Badge variant="outline" className="ml-2">
-                  {pendingActions.length} action(s) en attente
-                </Badge>
-              )}
-            </div>
+            {/* Offline Indicator */}
+            <OfflineIndicator />
 
             {/* Main Button */}
             <div>
