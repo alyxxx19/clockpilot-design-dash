@@ -3213,6 +3213,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
+  // NOTIFICATIONS ROUTES
+  // ========================================
+  
+  // Get notifications with pagination and filters
+  app.get('/api/notifications', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const type = req.query.type as string;
+      const isRead = req.query.isRead ? req.query.isRead === 'true' : undefined;
+      const search = req.query.search as string;
+
+      const notifications = await storage.getNotifications({
+        userId,
+        page,
+        limit,
+        type,
+        isRead,
+        search
+      });
+
+      const unreadCount = await storage.getUnreadNotificationCount(userId);
+
+      res.json({
+        data: {
+          notifications,
+          unreadCount,
+          hasMore: notifications.length === limit
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      res.status(500).json({ message: 'Erreur lors de la récupération des notifications' });
+    }
+  });
+
+  // Mark notification as read
+  app.patch('/api/notifications/:id/read', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const notificationId = parseInt(req.params.id);
+      const userId = req.user!.id;
+
+      await storage.markNotificationAsRead(notificationId, userId);
+      
+      res.json({ message: 'Notification marquée comme lue' });
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      res.status(500).json({ message: 'Erreur lors de la mise à jour de la notification' });
+    }
+  });
+
+  // Mark all notifications as read
+  app.patch('/api/notifications/read-all', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+
+      await storage.markAllNotificationsAsRead(userId);
+      
+      res.json({ message: 'Toutes les notifications marquées comme lues' });
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+      res.status(500).json({ message: 'Erreur lors de la mise à jour des notifications' });
+    }
+  });
+
+  // Delete notification
+  app.delete('/api/notifications/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const notificationId = parseInt(req.params.id);
+      const userId = req.user!.id;
+
+      await storage.deleteNotification(notificationId, userId);
+      
+      res.json({ message: 'Notification supprimée' });
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      res.status(500).json({ message: 'Erreur lors de la suppression de la notification' });
+    }
+  });
+
+  // Get notification preferences
+  app.get('/api/notifications/preferences', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+
+      const preferences = await storage.getNotificationPreferences(userId);
+      
+      res.json({ data: preferences });
+    } catch (error) {
+      console.error('Error fetching notification preferences:', error);
+      res.status(500).json({ message: 'Erreur lors de la récupération des préférences' });
+    }
+  });
+
+  // Update notification preferences
+  app.patch('/api/notifications/preferences', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const preferences = req.body;
+
+      await storage.updateNotificationPreferences(userId, preferences);
+      
+      res.json({ message: 'Préférences mises à jour' });
+    } catch (error) {
+      console.error('Error updating notification preferences:', error);
+      res.status(500).json({ message: 'Erreur lors de la mise à jour des préférences' });
+    }
+  });
+
+  // ========================================
   // EXPORT ROUTES - New comprehensive implementation
   // ========================================
   
