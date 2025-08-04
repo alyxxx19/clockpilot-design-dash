@@ -39,6 +39,9 @@ import {
 } from "@shared/schema";
 import { initializeNotificationService, getNotificationService } from "./notificationService";
 import { ExportService } from "./exportService";
+import { db } from "./db";
+import { sql, and, or, eq } from "drizzle-orm";
+import { timeEntries } from "@shared/schema";
 
 // ============================================================================
 // INTERFACES
@@ -630,24 +633,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hire_date: employeeData.hireDate,
         contract_type: employeeData.contractType,
         hourly_rate: employeeData.hourlyRate,
-        vacation_days_total: employeeData.vacationDaysTotal,
+        weekly_hours: employeeData.weeklyHours,
+        vacation_days_total: employeeData.vacationDaysTotal || 25,
+        vacation_days_used: 0,
         phone: employeeData.phone,
         address: employeeData.address,
+        is_active: true,
       });
-
-      // TODO: Send welcome email with temporary password
-      console.log(`Welcome email should be sent to ${employeeData.email} with temp password: ${tempPassword}`);
 
       res.status(201).json({
         message: 'Employee created successfully',
         data: {
-          employee: newEmployee,
-          user: {
-            id: newUser.id,
-            email: newUser.email,
-            username: newUser.username,
-          },
-          temporaryPassword: tempPassword, // In production, this should be sent via email only
+          ...newEmployee,
+          tempPassword, // Return temp password for admin to share
+          userEmail: newUser.email,
         },
       });
     } catch (error) {
@@ -655,6 +654,201 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         error: 'Failed to create employee',
         code: 'CREATE_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // PUT /api/employees/:id - Update employee (Admin or self with limitations)
+  app.put('/api/employees/:id', authenticateToken, validateRequest(updateEmployeeSchema), async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      const updateData = req.body;
+      const isAdmin = req.user!.role === 'admin';
+
+      // Check permissions
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only update own profile',
+            code: 'ACCESS_DENIED'
+          });
+        }
+
+        // Non-admin users can only update limited fields
+        const allowedFields = ['phone', 'address'];
+        const hasRestrictedFields = Object.keys(updateData).some(key => 
+          !allowedFields.includes(key)
+        );
+
+        if (hasRestrictedFields) {
+          return res.status(403).json({
+            error: 'Access denied - cannot update restricted fields',
+            code: 'RESTRICTED_FIELDS'
+          });
+        }
+      }
+
+      // Verify employee exists
+      const existingEmployee = await storage.getEmployee(employeeId);
+      if (!existingEmployee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      // Update employee
+      const updatedEmployee = await storage.updateEmployee(employeeId, updateData);
+      if (!updatedEmployee) {
+        return res.status(500).json({
+          error: 'Failed to update employee',
+          code: 'UPDATE_FAILED'
+        });
+      }
+
+      // Update associated user if email changed (admin only)
+      if (isAdmin && updateData.email && updateData.email !== existingEmployee.user_id) {
+        const existingUser = await storage.getUserByEmail(updateData.email);
+        if (existingUser && existingUser.id !== existingEmployee.user_id) {
+          return res.status(409).json({
+            error: 'Email already exists',
+            code: 'EMAIL_EXISTS'
+          });
+        }
+
+        await storage.updateUser(existingEmployee.user_id, {
+          email: updateData.email,
+        });
+      }
+
+      // Get updated employee with details
+      const employeeWithDetails = await storage.getEmployeeWithDetails(employeeId);
+
+      res.json({
+        message: 'Employee updated successfully',
+        data: employeeWithDetails,
+      });
+    } catch (error) {
+      console.error('Update employee error:', error);
+      res.status(500).json({
+        error: 'Failed to update employee',
+        code: 'UPDATE_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // DELETE /api/employees/:id - Soft delete employee (Admin only)
+  app.delete('/api/employees/:id', authenticateToken, authorizeRole(['admin']), async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      // Check if employee exists
+      const existingEmployee = await storage.getEmployee(employeeId);
+      if (!existingEmployee) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      // Check if employee has active time entries or planning
+      const hasActiveEntries = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(timeEntries)
+        .where(
+          and(
+            eq(timeEntries.employee_id, employeeId),
+            or(
+              eq(timeEntries.status, 'draft'),
+              eq(timeEntries.status, 'submitted')
+            )
+          )
+        );
+
+      if (hasActiveEntries[0]?.count > 0) {
+        return res.status(409).json({
+          error: 'Cannot delete employee with active time entries',
+          code: 'HAS_ACTIVE_ENTRIES',
+          details: `Employee has ${hasActiveEntries[0].count} active time entries`
+        });
+      }
+
+      // Soft delete employee
+      const deletedEmployee = await storage.softDeleteEmployee(employeeId);
+      if (!deletedEmployee) {
+        return res.status(500).json({
+          error: 'Failed to delete employee',
+          code: 'DELETE_FAILED'
+        });
+      }
+
+      res.json({
+        message: 'Employee deleted successfully',
+        data: { id: employeeId, deletedAt: new Date() },
+      });
+    } catch (error) {
+      console.error('Delete employee error:', error);
+      res.status(500).json({
+        error: 'Failed to delete employee',
+        code: 'DELETE_EMPLOYEE_ERROR'
+      });
+    }
+  });
+
+  // GET /api/employees/:id/stats - Get employee statistics (Admin or self)
+  app.get('/api/employees/:id/stats', authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+      const employeeId = parseInt(req.params.id);
+      if (isNaN(employeeId)) {
+        return res.status(400).json({
+          error: 'Invalid employee ID',
+          code: 'INVALID_ID'
+        });
+      }
+
+      // Check permissions
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin) {
+        const currentUserEmployee = await storage.getEmployeeByUserId(req.user!.id);
+        if (!currentUserEmployee || currentUserEmployee.id !== employeeId) {
+          return res.status(403).json({
+            error: 'Access denied - can only view own stats',
+            code: 'ACCESS_DENIED'
+          });
+        }
+      }
+
+      const stats = await storage.getEmployeeStats(employeeId);
+      if (!stats) {
+        return res.status(404).json({
+          error: 'Employee not found',
+          code: 'EMPLOYEE_NOT_FOUND'
+        });
+      }
+
+      res.json({
+        message: 'Employee statistics retrieved successfully',
+        data: stats,
+      });
+    } catch (error) {
+      console.error('Get employee stats error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch employee statistics',
+        code: 'FETCH_STATS_ERROR'
       });
     }
   });

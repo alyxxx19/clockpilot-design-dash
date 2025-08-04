@@ -58,6 +58,14 @@ export interface IStorage {
       search?: string; 
       department?: number; 
       status?: string; 
+      contractType?: string;
+      managerId?: number;
+      hiredAfter?: string;
+      hiredBefore?: string;
+      minWeeklyHours?: number;
+      maxWeeklyHours?: number;
+      hasEmail?: boolean;
+      hasPhone?: boolean;
       sortBy?: string; 
       sortOrder?: string; 
     }
@@ -515,69 +523,80 @@ export class DatabaseStorage implements IStorage {
 
     // Get time entries stats (this week, this month)
     const thisWeekHours = await db
-      .select({ totalHours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))/3600), 0)` })
+      .select({
+        totalHours: sql<number>`SUM(
+          CASE 
+            WHEN ${timeEntries.end_time} IS NOT NULL 
+            THEN EXTRACT(EPOCH FROM (${timeEntries.end_time}::time - ${timeEntries.start_time}::time))/3600
+            ELSE 0 
+          END
+        )`,
+        overtimeHours: sql<number>`SUM(
+          CASE 
+            WHEN ${timeEntries.type} = 'overtime' AND ${timeEntries.end_time} IS NOT NULL 
+            THEN EXTRACT(EPOCH FROM (${timeEntries.end_time}::time - ${timeEntries.start_time}::time))/3600
+            ELSE 0 
+          END
+        )`,
+        validatedHours: sql<number>`SUM(
+          CASE 
+            WHEN ${timeEntries.status} = 'validated' AND ${timeEntries.end_time} IS NOT NULL 
+            THEN EXTRACT(EPOCH FROM (${timeEntries.end_time}::time - ${timeEntries.start_time}::time))/3600
+            ELSE 0 
+          END
+        )`,
+      })
       .from(timeEntries)
       .where(
         and(
           eq(timeEntries.employee_id, id),
-          gte(timeEntries.date, weekStart.toISOString().split('T')[0]),
-          eq(timeEntries.status, 'validated')
+          gte(timeEntries.date, weekStart.toISOString().split('T')[0])
         )
       );
 
     const thisMonthHours = await db
-      .select({ totalHours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))/3600), 0)` })
+      .select({
+        totalHours: sql<number>`SUM(
+          CASE 
+            WHEN ${timeEntries.end_time} IS NOT NULL 
+            THEN EXTRACT(EPOCH FROM (${timeEntries.end_time}::time - ${timeEntries.start_time}::time))/3600
+            ELSE 0 
+          END
+        )`,
+        overtimeHours: sql<number>`SUM(
+          CASE 
+            WHEN ${timeEntries.type} = 'overtime' AND ${timeEntries.end_time} IS NOT NULL 
+            THEN EXTRACT(EPOCH FROM (${timeEntries.end_time}::time - ${timeEntries.start_time}::time))/3600
+            ELSE 0 
+          END
+        )`,
+      })
       .from(timeEntries)
       .where(
         and(
           eq(timeEntries.employee_id, id),
-          gte(timeEntries.date, monthStart.toISOString().split('T')[0]),
-          eq(timeEntries.status, 'validated')
+          gte(timeEntries.date, monthStart.toISOString().split('T')[0])
         )
       );
 
-    // Get vacation stats
-    const vacationTaken = await db
-      .select({ count: sql<number>`count(*)` })
+    // Planning entries validation rate
+    const planningStats = await db
+      .select({
+        total: sql<number>`COUNT(*)`,
+        validated: sql<number>`COUNT(CASE WHEN ${planningEntries.status} = 'validated' THEN 1 END)`,
+        rejected: sql<number>`COUNT(CASE WHEN ${planningEntries.status} = 'rejected' THEN 1 END)`,
+      })
       .from(planningEntries)
       .where(
         and(
           eq(planningEntries.employee_id, id),
-          eq(planningEntries.type, 'vacation'),
-          eq(planningEntries.status, 'validated'),
-          gte(planningEntries.date, yearStart.toISOString().split('T')[0])
+          gte(planningEntries.date, monthStart.toISOString().split('T')[0])
         )
       );
 
-    // Get validation rate (percentage of submitted entries that are validated)
-    const totalSubmitted = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, id),
-          sql`status IN ('submitted', 'validated', 'rejected')`
-        )
-      );
-
-    const totalValidated = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, id),
-          eq(timeEntries.status, 'validated')
-        )
-      );
-
-    // Get active projects
+    // Active projects count
     const activeProjects = await db
-      .select({
-        projectId: projects.id,
-        projectName: projects.name,
-        projectStatus: projects.status,
-        role: projectAssignments.role,
-      })
+      .select({ count: sql<number>`COUNT(*)` })
       .from(projectAssignments)
       .leftJoin(projects, eq(projectAssignments.project_id, projects.id))
       .where(
@@ -587,1204 +606,47 @@ export class DatabaseStorage implements IStorage {
         )
       );
 
-    const submittedCount = totalSubmitted[0]?.count || 0;
-    const validatedCount = totalValidated[0]?.count || 0;
-    const validationRate = submittedCount > 0 ? (validatedCount / submittedCount) * 100 : 0;
+    const vacationDaysRemaining = employee.vacation_days_total - employee.vacation_days_used;
+    const validationRate = planningStats[0]?.total > 0 
+      ? Math.round((planningStats[0]?.validated / planningStats[0]?.total) * 100)
+      : 0;
 
     return {
-      weeklyHours: thisWeekHours[0]?.totalHours || 0,
-      monthlyHours: thisMonthHours[0]?.totalHours || 0,
-      vacationDaysUsed: employee.vacation_days_used,
-      vacationDaysRemaining: employee.vacation_days_total - employee.vacation_days_used,
-      validationRate: Math.round(validationRate * 100) / 100,
-      totalSubmissions: submittedCount,
-      totalValidated: validatedCount,
-      activeProjects: activeProjects,
+      employeeId: id,
+      thisWeek: {
+        totalHours: Math.round((thisWeekHours[0]?.totalHours || 0) * 100) / 100,
+        overtimeHours: Math.round((thisWeekHours[0]?.overtimeHours || 0) * 100) / 100,
+        validatedHours: Math.round((thisWeekHours[0]?.validatedHours || 0) * 100) / 100,
+      },
+      thisMonth: {
+        totalHours: Math.round((thisMonthHours[0]?.totalHours || 0) * 100) / 100,
+        overtimeHours: Math.round((thisMonthHours[0]?.overtimeHours || 0) * 100) / 100,
+      },
+      vacation: {
+        total: employee.vacation_days_total,
+        used: employee.vacation_days_used,
+        remaining: vacationDaysRemaining,
+      },
+      planning: {
+        total: planningStats[0]?.total || 0,
+        validated: planningStats[0]?.validated || 0,
+        rejected: planningStats[0]?.rejected || 0,
+        validationRate,
+      },
+      activeProjects: activeProjects[0]?.count || 0,
     };
   }
 
   async softDeleteEmployee(id: number): Promise<Employee | undefined> {
-    // Check for future planning entries
-    const futureEntries = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(planningEntries)
-      .where(
-        and(
-          eq(planningEntries.employee_id, id),
-          gte(planningEntries.date, new Date().toISOString().split('T')[0])
-        )
-      );
-
-    if ((futureEntries[0]?.count || 0) > 0) {
-      throw new Error('Cannot deactivate employee with future planning entries');
-    }
-
-    // Soft delete (set as inactive)
     const [employee] = await db
       .update(employees)
       .set({ 
-        is_active: false, 
-        updated_at: new Date() 
+        is_active: false,
+        updated_at: new Date(),
       })
       .where(eq(employees.id, id))
       .returning();
-
     return employee || undefined;
-  }
-
-  // ========================================
-  // PLANNING OPERATIONS
-  // ========================================
-
-  async getPlanningEntries(
-    startDate: string,
-    endDate: string,
-    employeeId?: number,
-    departmentId?: number
-  ): Promise<any[]> {
-    let query = db
-      .select({
-        id: planningEntries.id,
-        employeeId: planningEntries.employee_id,
-        date: planningEntries.date,
-        startTime: planningEntries.start_time,
-        endTime: planningEntries.end_time,
-        type: planningEntries.type,
-        status: planningEntries.status,
-        notes: planningEntries.notes,
-        createdAt: planningEntries.created_at,
-        updatedAt: planningEntries.updated_at,
-        // Employee info
-        employeeFirstName: employees.first_name,
-        employeeLastName: employees.last_name,
-        employeeNumber: employees.employee_number,
-        // Department info
-        departmentName: departments.name,
-      })
-      .from(planningEntries)
-      .leftJoin(employees, eq(planningEntries.employee_id, employees.id))
-      .leftJoin(departments, eq(employees.department_id, departments.id));
-
-    const conditions = [
-      gte(planningEntries.date, startDate),
-      lte(planningEntries.date, endDate)
-    ];
-
-    if (employeeId) {
-      conditions.push(eq(planningEntries.employee_id, employeeId));
-    }
-
-    if (departmentId) {
-      conditions.push(eq(employees.department_id, departmentId));
-    }
-
-    query = query.where(and(...conditions));
-    query = query.orderBy(planningEntries.date, planningEntries.start_time);
-
-    return await query;
-  }
-
-  async getEmployeeWeeklyPlanning(employeeId: number, weekStart: string): Promise<any> {
-    // Calculate week end (6 days after start)
-    const weekStartDate = new Date(weekStart);
-    const weekEndDate = new Date(weekStartDate);
-    weekEndDate.setDate(weekEndDate.getDate() + 6);
-    const weekEnd = weekEndDate.toISOString().split('T')[0];
-
-    // Get planning entries for the week
-    const planningEntriesData = await this.getPlanningEntries(weekStart, weekEnd, employeeId);
-
-    // Get corresponding time entries for comparison
-    const timeEntriesData = await db
-      .select({
-        id: timeEntries.id,
-        date: timeEntries.date,
-        startTime: timeEntries.start_time,
-        endTime: timeEntries.end_time,
-        status: timeEntries.status,
-        actualHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600`,
-      })
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, weekStart),
-          lte(timeEntries.date, weekEnd)
-        )
-      )
-      .orderBy(timeEntries.date, timeEntries.start_time);
-
-    // Get validation status
-    const validation = await this.getValidationByEmployeeAndWeek(employeeId, weekStart);
-
-    // Calculate totals
-    let plannedHours = 0;
-    let actualHours = 0;
-
-    planningEntriesData.forEach(entry => {
-      if (entry.startTime && entry.endTime && entry.type === 'work') {
-        const start = new Date(`1970-01-01T${entry.startTime}:00`);
-        const end = new Date(`1970-01-01T${entry.endTime}:00`);
-        plannedHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-      }
-    });
-
-    timeEntriesData.forEach(entry => {
-      actualHours += entry.actualHours || 0;
-    });
-
-    return {
-      employeeId,
-      weekStart,
-      weekEnd,
-      planningEntries: planningEntriesData,
-      timeEntries: timeEntriesData,
-      validation,
-      summary: {
-        plannedHours: Math.round(plannedHours * 100) / 100,
-        actualHours: Math.round(actualHours * 100) / 100,
-        variance: Math.round((actualHours - plannedHours) * 100) / 100,
-        validationStatus: validation?.status || 'pending',
-      },
-    };
-  }
-
-  async createPlanningEntry(entry: InsertPlanningEntry): Promise<PlanningEntry> {
-    const [newEntry] = await db
-      .insert(planningEntries)
-      .values(entry)
-      .returning();
-    return newEntry;
-  }
-
-  async updatePlanningEntry(id: number, entry: Partial<InsertPlanningEntry>): Promise<PlanningEntry | undefined> {
-    const [updatedEntry] = await db
-      .update(planningEntries)
-      .set({ ...entry, updated_at: new Date() })
-      .where(eq(planningEntries.id, id))
-      .returning();
-    return updatedEntry || undefined;
-  }
-
-  async deletePlanningEntry(id: number): Promise<boolean> {
-    const result = await db
-      .delete(planningEntries)
-      .where(eq(planningEntries.id, id));
-    return result.rowCount > 0;
-  }
-
-  async bulkCreatePlanningEntries(entries: InsertPlanningEntry[]): Promise<PlanningEntry[]> {
-    const newEntries = await db
-      .insert(planningEntries)
-      .values(entries)
-      .returning();
-    return newEntries;
-  }
-
-  async bulkUpdatePlanningEntries(updates: { id: number; data: Partial<InsertPlanningEntry> }[]): Promise<PlanningEntry[]> {
-    const results = [];
-    
-    // Process updates in a transaction-like manner
-    for (const update of updates) {
-      const result = await this.updatePlanningEntry(update.id, update.data);
-      if (result) {
-        results.push(result);
-      }
-    }
-    
-    return results;
-  }
-
-  // ========================================
-  // PLANNING VALIDATION
-  // ========================================
-
-  async createValidation(validation: InsertValidation): Promise<Validation> {
-    const [newValidation] = await db
-      .insert(validations)
-      .values(validation)
-      .returning();
-    return newValidation;
-  }
-
-  async getValidationByEmployeeAndWeek(employeeId: number, weekStart: string): Promise<Validation | undefined> {
-    const [validation] = await db
-      .select()
-      .from(validations)
-      .where(
-        and(
-          eq(validations.employee_id, employeeId),
-          eq(validations.week_start, weekStart)
-        )
-      );
-    return validation || undefined;
-  }
-
-  // ========================================
-  // PLANNING CONFLICTS AND VALIDATION LOGIC
-  // ========================================
-
-  async validateDailyHours(employeeId: number, date: string, startTime: string, endTime: string): Promise<{ valid: boolean; hours: number; conflicts: string[] }> {
-    const conflicts = [];
-    
-    // Calculate hours for this entry
-    const start = new Date(`1970-01-01T${startTime}:00`);
-    const end = new Date(`1970-01-01T${endTime}:00`);
-    const entryHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-
-    // Get existing entries for the same day
-    const existingEntries = await db
-      .select({
-        startTime: planningEntries.start_time,
-        endTime: planningEntries.end_time,
-      })
-      .from(planningEntries)
-      .where(
-        and(
-          eq(planningEntries.employee_id, employeeId),
-          eq(planningEntries.date, date),
-          eq(planningEntries.type, 'work')
-        )
-      );
-
-    // Calculate total daily hours including this entry
-    let totalDailyHours = entryHours;
-    existingEntries.forEach(entry => {
-      if (entry.startTime && entry.endTime) {
-        const existingStart = new Date(`1970-01-01T${entry.startTime}:00`);
-        const existingEnd = new Date(`1970-01-01T${entry.endTime}:00`);
-        totalDailyHours += (existingEnd.getTime() - existingStart.getTime()) / (1000 * 60 * 60);
-      }
-    });
-
-    // Check daily limit (10h max)
-    if (totalDailyHours > 10) {
-      conflicts.push(`Daily hours exceed 10h limit (${totalDailyHours.toFixed(1)}h total)`);
-    }
-
-    // Check for overlaps
-    for (const existing of existingEntries) {
-      if (existing.startTime && existing.endTime) {
-        const existingStart = new Date(`1970-01-01T${existing.startTime}:00`);
-        const existingEnd = new Date(`1970-01-01T${existing.endTime}:00`);
-        
-        if ((start < existingEnd && end > existingStart)) {
-          conflicts.push(`Time overlap with existing entry ${existing.startTime}-${existing.endTime}`);
-        }
-      }
-    }
-
-    return {
-      valid: conflicts.length === 0,
-      hours: entryHours,
-      conflicts,
-    };
-  }
-
-  async validateWeeklyHours(employeeId: number, weekStart: string): Promise<{ valid: boolean; totalHours: number; conflicts: string[] }> {
-    const conflicts = [];
-    
-    // Calculate week end
-    const weekStartDate = new Date(weekStart);
-    const weekEndDate = new Date(weekStartDate);
-    weekEndDate.setDate(weekEndDate.getDate() + 6);
-    const weekEnd = weekEndDate.toISOString().split('T')[0];
-
-    // Get all work entries for the week
-    const weeklyEntries = await db
-      .select({
-        startTime: planningEntries.start_time,
-        endTime: planningEntries.end_time,
-        date: planningEntries.date,
-      })
-      .from(planningEntries)
-      .where(
-        and(
-          eq(planningEntries.employee_id, employeeId),
-          gte(planningEntries.date, weekStart),
-          lte(planningEntries.date, weekEnd),
-          eq(planningEntries.type, 'work')
-        )
-      );
-
-    // Calculate total weekly hours
-    let totalWeeklyHours = 0;
-    weeklyEntries.forEach(entry => {
-      if (entry.startTime && entry.endTime) {
-        const start = new Date(`1970-01-01T${entry.startTime}:00`);
-        const end = new Date(`1970-01-01T${entry.endTime}:00`);
-        totalWeeklyHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-      }
-    });
-
-    // Check weekly limit (48h max)
-    if (totalWeeklyHours > 48) {
-      conflicts.push(`Weekly hours exceed 48h limit (${totalWeeklyHours.toFixed(1)}h total)`);
-    }
-
-    // Check average weekly hours (35h target)
-    if (totalWeeklyHours < 30) {
-      conflicts.push(`Weekly hours below recommended minimum (${totalWeeklyHours.toFixed(1)}h, target: 35h)`);
-    }
-
-    return {
-      valid: conflicts.length === 0,
-      totalHours: totalWeeklyHours,
-      conflicts,
-    };
-  }
-
-  async validateRestPeriod(employeeId: number, date: string, startTime: string): Promise<{ valid: boolean; conflicts: string[] }> {
-    const conflicts = [];
-    
-    // Get previous day's last entry
-    const yesterday = new Date(date);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-    const [lastEntry] = await db
-      .select({
-        endTime: planningEntries.end_time,
-        date: planningEntries.date,
-      })
-      .from(planningEntries)
-      .where(
-        and(
-          eq(planningEntries.employee_id, employeeId),
-          eq(planningEntries.date, yesterdayStr),
-          eq(planningEntries.type, 'work')
-        )
-      )
-      .orderBy(desc(planningEntries.end_time))
-      .limit(1);
-
-    if (lastEntry && lastEntry.endTime) {
-      // Calculate rest period
-      const lastEndTime = new Date(`1970-01-01T${lastEntry.endTime}:00`);
-      const nextStartTime = new Date(`1970-01-01T${startTime}:00`);
-      
-      // Add 24 hours to handle day transition
-      nextStartTime.setDate(nextStartTime.getDate() + 1);
-      
-      const restHours = (nextStartTime.getTime() - lastEndTime.getTime()) / (1000 * 60 * 60);
-      
-      // Check 11h minimum rest period
-      if (restHours < 11) {
-        conflicts.push(`Insufficient rest period: ${restHours.toFixed(1)}h (minimum: 11h)`);
-      }
-    }
-
-    return {
-      valid: conflicts.length === 0,
-      conflicts,
-    };
-  }
-
-  async detectPlanningConflicts(employeeId?: number, startDate?: string, endDate?: string): Promise<any[]> {
-    const conflicts = [];
-    
-    // Default date range (current week)
-    const defaultStart = startDate || new Date().toISOString().split('T')[0];
-    const defaultEnd = endDate || (() => {
-      const end = new Date(defaultStart);
-      end.setDate(end.getDate() + 6);
-      return end.toISOString().split('T')[0];
-    })();
-
-    // Get employees to check
-    let employeeIds = [];
-    if (employeeId) {
-      employeeIds = [employeeId];
-    } else {
-      const activeEmployees = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .where(eq(employees.is_active, true));
-      employeeIds = activeEmployees.map(emp => emp.id);
-    }
-
-    // Check conflicts for each employee
-    for (const empId of employeeIds) {
-      const entries = await this.getPlanningEntries(defaultStart, defaultEnd, empId);
-      
-      // Group by date for daily validation
-      const entriesByDate = entries.reduce((acc, entry) => {
-        if (!acc[entry.date]) acc[entry.date] = [];
-        acc[entry.date].push(entry);
-        return acc;
-      }, {} as Record<string, any[]>);
-
-      // Check daily conflicts
-      for (const [date, dayEntries] of Object.entries(entriesByDate)) {
-        let dailyHours = 0;
-        const workEntries = dayEntries.filter(e => e.type === 'work');
-        
-        // Calculate total daily hours
-        workEntries.forEach(entry => {
-          if (entry.startTime && entry.endTime) {
-            const start = new Date(`1970-01-01T${entry.startTime}:00`);
-            const end = new Date(`1970-01-01T${entry.endTime}:00`);
-            dailyHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-          }
-        });
-
-        // Daily hours conflict
-        if (dailyHours > 10) {
-          conflicts.push({
-            type: 'max_daily_hours',
-            severity: 'error',
-            employeeId: empId,
-            date,
-            description: `Daily hours exceed 10h limit (${dailyHours.toFixed(1)}h)`,
-            suggestions: ['Reduce working hours', 'Split shifts across multiple days'],
-          });
-        }
-
-        // Check overlaps
-        for (let i = 0; i < workEntries.length; i++) {
-          for (let j = i + 1; j < workEntries.length; j++) {
-            const entry1 = workEntries[i];
-            const entry2 = workEntries[j];
-            
-            if (entry1.startTime && entry1.endTime && entry2.startTime && entry2.endTime) {
-              const start1 = new Date(`1970-01-01T${entry1.startTime}:00`);
-              const end1 = new Date(`1970-01-01T${entry1.endTime}:00`);
-              const start2 = new Date(`1970-01-01T${entry2.startTime}:00`);
-              const end2 = new Date(`1970-01-01T${entry2.endTime}:00`);
-              
-              if (start1 < end2 && start2 < end1) {
-                conflicts.push({
-                  type: 'overlap',
-                  severity: 'error',
-                  employeeId: empId,
-                  date,
-                  description: `Time overlap: ${entry1.startTime}-${entry1.endTime} and ${entry2.startTime}-${entry2.endTime}`,
-                  suggestions: ['Adjust start/end times', 'Remove conflicting entry'],
-                });
-              }
-            }
-          }
-        }
-      }
-
-      // Check weekly hours
-      const weekStart = defaultStart;
-      const weeklyValidation = await this.validateWeeklyHours(empId, weekStart);
-      if (!weeklyValidation.valid) {
-        weeklyValidation.conflicts.forEach(conflict => {
-          conflicts.push({
-            type: 'max_weekly_hours',
-            severity: weeklyValidation.totalHours > 48 ? 'error' : 'warning',
-            employeeId: empId,
-            date: weekStart,
-            description: conflict,
-            suggestions: ['Reduce daily hours', 'Add rest days'],
-          });
-        });
-      }
-    }
-
-    return conflicts;
-  }
-
-  // ========================================
-  // PLANNING GENERATION
-  // ========================================
-
-  async generatePlanningForPeriod(
-    startDate: string,
-    endDate: string,
-    employeeIds?: number[],
-    departmentId?: number,
-    templateId?: number
-  ): Promise<PlanningEntry[]> {
-    const generatedEntries = [];
-    
-    // Get target employees
-    let targetEmployees = [];
-    if (employeeIds && employeeIds.length > 0) {
-      targetEmployees = employeeIds;
-    } else if (departmentId) {
-      const deptEmployees = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .where(
-          and(
-            eq(employees.department_id, departmentId),
-            eq(employees.is_active, true)
-          )
-        );
-      targetEmployees = deptEmployees.map(emp => emp.id);
-    } else {
-      const allEmployees = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .where(eq(employees.is_active, true));
-      targetEmployees = allEmployees.map(emp => emp.id);
-    }
-
-    // Generate planning entries
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    for (const employeeId of targetEmployees) {
-      const current = new Date(start);
-      
-      while (current <= end) {
-        const dateStr = current.toISOString().split('T')[0];
-        const dayOfWeek = current.getDay(); // 0 = Sunday, 1 = Monday, etc.
-        
-        // Skip weekends for basic template
-        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-          // Basic 9-5 template
-          const entry: InsertPlanningEntry = {
-            employee_id: employeeId,
-            date: dateStr,
-            start_time: '09:00',
-            end_time: '17:00',
-            type: 'work',
-            status: 'draft',
-            notes: 'Auto-generated planning entry',
-          };
-
-          // Validate before creating
-          const validation = await this.validateDailyHours(employeeId, dateStr, '09:00', '17:00');
-          if (validation.valid) {
-            const created = await this.createPlanningEntry(entry);
-            generatedEntries.push(created);
-          }
-        }
-        
-        current.setDate(current.getDate() + 1);
-      }
-    }
-
-    return generatedEntries;
-  }
-
-  // ========================================
-  // TIME ENTRIES OPERATIONS
-  // ========================================
-
-  async getTimeEntries(
-    employeeId?: number,
-    dateFrom?: string,
-    dateTo?: string,
-    status?: string,
-    page: number = 1,
-    limit: number = 20
-  ): Promise<{ entries: any[]; total: number; page: number; totalPages: number }> {
-    let query = db
-      .select({
-        id: timeEntries.id,
-        employeeId: timeEntries.employee_id,
-        date: timeEntries.date,
-        startTime: timeEntries.start_time,
-        endTime: timeEntries.end_time,
-        breakDuration: timeEntries.break_duration,
-        projectId: timeEntries.project_id,
-        taskId: timeEntries.task_id,
-        description: timeEntries.description,
-        location: timeEntries.location,
-        isOvertime: timeEntries.is_overtime,
-        overtimeReason: timeEntries.overtime_reason,
-        status: timeEntries.status,
-        createdAt: timeEntries.created_at,
-        updatedAt: timeEntries.updated_at,
-        // Employee info
-        employeeFirstName: employees.first_name,
-        employeeLastName: employees.last_name,
-        employeeNumber: employees.employee_number,
-        // Project info
-        projectName: projects.name,
-        // Task info  
-        taskName: tasks.name,
-        // Calculated hours
-        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
-      })
-      .from(timeEntries)
-      .leftJoin(employees, eq(timeEntries.employee_id, employees.id))
-      .leftJoin(projects, eq(timeEntries.project_id, projects.id))
-      .leftJoin(tasks, eq(timeEntries.task_id, tasks.id));
-
-    const conditions = [];
-
-    if (employeeId) {
-      conditions.push(eq(timeEntries.employee_id, employeeId));
-    }
-
-    if (dateFrom) {
-      conditions.push(gte(timeEntries.date, dateFrom));
-    }
-
-    if (dateTo) {
-      conditions.push(lte(timeEntries.date, dateTo));
-    }
-
-    if (status) {
-      conditions.push(eq(timeEntries.status, status));
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-
-    // Get total count
-    const totalResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(timeEntries)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-
-    const total = totalResult[0]?.count || 0;
-    const totalPages = Math.ceil(total / limit);
-    const offset = (page - 1) * limit;
-
-    // Get paginated results
-    const entries = await query
-      .orderBy(desc(timeEntries.date), desc(timeEntries.start_time))
-      .limit(limit)
-      .offset(offset);
-
-    return {
-      entries,
-      total,
-      page,
-      totalPages,
-    };
-  }
-
-  async getTimeEntriesByEmployee(employeeId: number, date?: string): Promise<any[]> {
-    let query = db
-      .select({
-        id: timeEntries.id,
-        date: timeEntries.date,
-        startTime: timeEntries.start_time,
-        endTime: timeEntries.end_time,
-        breakDuration: timeEntries.break_duration,
-        projectId: timeEntries.project_id,
-        taskId: timeEntries.task_id,
-        description: timeEntries.description,
-        location: timeEntries.location,
-        isOvertime: timeEntries.is_overtime,
-        overtimeReason: timeEntries.overtime_reason,
-        status: timeEntries.status,
-        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
-        projectName: projects.name,
-        taskName: tasks.name,
-      })
-      .from(timeEntries)
-      .leftJoin(projects, eq(timeEntries.project_id, projects.id))
-      .leftJoin(tasks, eq(timeEntries.task_id, tasks.id))
-      .where(eq(timeEntries.employee_id, employeeId));
-
-    if (date) {
-      query = query.where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          eq(timeEntries.date, date)
-        )
-      );
-    }
-
-    return await query.orderBy(timeEntries.date, timeEntries.start_time);
-  }
-
-  async getCurrentDayTimeEntries(employeeId: number): Promise<any[]> {
-    const today = new Date().toISOString().split('T')[0];
-    return await this.getTimeEntriesByEmployee(employeeId, today);
-  }
-
-  async createTimeEntry(entry: InsertTimeEntry): Promise<TimeEntry> {
-    const [newEntry] = await db
-      .insert(timeEntries)
-      .values(entry)
-      .returning();
-    return newEntry;
-  }
-
-  async updateTimeEntry(id: number, entry: Partial<InsertTimeEntry>): Promise<TimeEntry | undefined> {
-    const [updatedEntry] = await db
-      .update(timeEntries)
-      .set({ ...entry, updated_at: new Date() })
-      .where(eq(timeEntries.id, id))
-      .returning();
-    return updatedEntry || undefined;
-  }
-
-  async deleteTimeEntry(id: number): Promise<boolean> {
-    const result = await db
-      .delete(timeEntries)
-      .where(eq(timeEntries.id, id));
-    return result.rowCount > 0;
-  }
-
-  async bulkCreateTimeEntries(entries: InsertTimeEntry[]): Promise<TimeEntry[]> {
-    const newEntries = await db
-      .insert(timeEntries)
-      .values(entries)
-      .returning();
-    return newEntries;
-  }
-
-  async bulkUpdateTimeEntries(updates: { id: number; data: Partial<InsertTimeEntry> }[]): Promise<TimeEntry[]> {
-    const results = [];
-    
-    for (const update of updates) {
-      const result = await this.updateTimeEntry(update.id, update.data);
-      if (result) {
-        results.push(result);
-      }
-    }
-    
-    return results;
-  }
-
-  // ========================================
-  // TIME ENTRY VALIDATION AND BUSINESS LOGIC
-  // ========================================
-
-  async validateTimeEntryOverlap(
-    employeeId: number, 
-    date: string, 
-    startTime: string, 
-    endTime: string, 
-    excludeId?: number
-  ): Promise<{ valid: boolean; conflicts: string[] }> {
-    const conflicts = [];
-
-    // Get existing entries for the same day
-    let query = db
-      .select({
-        id: timeEntries.id,
-        startTime: timeEntries.start_time,
-        endTime: timeEntries.end_time,
-      })
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          eq(timeEntries.date, date)
-        )
-      );
-
-    if (excludeId) {
-      query = query.where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          eq(timeEntries.date, date),
-          ne(timeEntries.id, excludeId)
-        )
-      );
-    }
-
-    const existingEntries = await query;
-
-    // Check for overlaps
-    const newStart = new Date(`1970-01-01T${startTime}:00`);
-    const newEnd = new Date(`1970-01-01T${endTime}:00`);
-
-    for (const existing of existingEntries) {
-      if (existing.startTime && existing.endTime) {
-        const existingStart = new Date(`1970-01-01T${existing.startTime}:00`);
-        const existingEnd = new Date(`1970-01-01T${existing.endTime}:00`);
-        
-        if (newStart < existingEnd && newEnd > existingStart) {
-          conflicts.push(`Time overlap with existing entry ${existing.startTime}-${existing.endTime}`);
-        }
-      }
-    }
-
-    return {
-      valid: conflicts.length === 0,
-      conflicts,
-    };
-  }
-
-  calculateWorkingHours(startTime: string, endTime: string, breakDuration: number): number {
-    const start = new Date(`1970-01-01T${startTime}:00`);
-    const end = new Date(`1970-01-01T${endTime}:00`);
-    const totalMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
-    const workingMinutes = totalMinutes - breakDuration;
-    return Math.max(0, workingMinutes / 60); // Hours
-  }
-
-  async calculateOvertimeHours(
-    employeeId: number, 
-    date: string, 
-    totalHours: number
-  ): Promise<{ regularHours: number; overtimeHours: number }> {
-    // Get daily legal limit (10h) and weekly context
-    const dailyLimit = 10;
-    
-    // Calculate week start for weekly overtime calculation
-    const dateObj = new Date(date);
-    const weekStart = new Date(dateObj);
-    weekStart.setDate(dateObj.getDate() - dateObj.getDay() + 1); // Monday
-    const weekStartStr = weekStart.toISOString().split('T')[0];
-    
-    // Get weekly hours so far (excluding current entry)
-    const weeklyEntries = await db
-      .select({
-        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
-      })
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, weekStartStr),
-          lt(timeEntries.date, date), // Before current date
-          eq(timeEntries.status, 'validated')
-        )
-      );
-
-    const weeklyHoursBeforeToday = weeklyEntries.reduce((sum, entry) => sum + (entry.workingHours || 0), 0);
-    const totalWeeklyHours = weeklyHoursBeforeToday + totalHours;
-
-    // Calculate overtime
-    let dailyOvertime = Math.max(0, totalHours - dailyLimit);
-    let weeklyOvertime = Math.max(0, totalWeeklyHours - 48); // 48h weekly limit
-    
-    // Use the maximum of daily or weekly overtime
-    const overtimeHours = Math.max(dailyOvertime, weeklyOvertime);
-    const regularHours = totalHours - overtimeHours;
-
-    return {
-      regularHours: Math.max(0, regularHours),
-      overtimeHours: Math.max(0, overtimeHours),
-    };
-  }
-
-  async submitWeeklyTimeEntries(employeeId: number, weekStart: string): Promise<{ submitted: number; errors: string[] }> {
-    const errors = [];
-    
-    // Calculate week end
-    const weekStartDate = new Date(weekStart);
-    const weekEndDate = new Date(weekStartDate);
-    weekEndDate.setDate(weekEndDate.getDate() + 6);
-    const weekEnd = weekEndDate.toISOString().split('T')[0];
-
-    // Get all draft time entries for the week
-    const draftEntries = await db
-      .select()
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, weekStart),
-          lte(timeEntries.date, weekEnd),
-          eq(timeEntries.status, 'draft')
-        )
-      );
-
-    if (draftEntries.length === 0) {
-      errors.push('No draft entries found for the specified week');
-      return { submitted: 0, errors };
-    }
-
-    // Validate completeness (should have entries for working days)
-    const workingDays = [];
-    const current = new Date(weekStartDate);
-    while (current <= weekEndDate) {
-      const dayOfWeek = current.getDay();
-      if (dayOfWeek >= 1 && dayOfWeek <= 5) { // Monday to Friday
-        workingDays.push(current.toISOString().split('T')[0]);
-      }
-      current.setDate(current.getDate() + 1);
-    }
-
-    const entriesByDate = draftEntries.reduce((acc, entry) => {
-      if (!acc[entry.date]) acc[entry.date] = [];
-      acc[entry.date].push(entry);
-      return acc;
-    }, {} as Record<string, any[]>);
-
-    // Check for missing working days (optional validation)
-    const missingDays = workingDays.filter(day => !entriesByDate[day]);
-    if (missingDays.length > 0) {
-      errors.push(`Missing time entries for working days: ${missingDays.join(', ')}`);
-    }
-
-    // Submit all valid entries
-    let submitted = 0;
-    for (const entry of draftEntries) {
-      try {
-        await this.updateTimeEntry(entry.id, { status: 'submitted' });
-        submitted++;
-      } catch (error) {
-        errors.push(`Failed to submit entry ${entry.id}: ${error}`);
-      }
-    }
-
-    return { submitted, errors };
-  }
-
-  // ========================================
-  // TIME COMPARISON AND ANALYSIS
-  // ========================================
-
-  async compareTimeWithPlanning(employeeId: number, dateFrom: string, dateTo: string): Promise<any> {
-    // Get time entries
-    const timeEntriesData = await db
-      .select({
-        date: timeEntries.date,
-        workingHours: sql<number>`EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0)`,
-        isOvertime: timeEntries.is_overtime,
-      })
-      .from(timeEntries)
-      .where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, dateFrom),
-          lte(timeEntries.date, dateTo)
-        )
-      );
-
-    // Get planning entries
-    const planningData = await this.getPlanningEntries(dateFrom, dateTo, employeeId);
-
-    // Group and compare by date
-    const comparison = [];
-    const dateSet = new Set([
-      ...timeEntriesData.map(e => e.date),
-      ...planningData.map(e => e.date)
-    ]);
-
-    let totalPlannedHours = 0;
-    let totalActualHours = 0;
-    let totalOvertimeHours = 0;
-
-    for (const date of Array.from(dateSet).sort()) {
-      const dayTimeEntries = timeEntriesData.filter(e => e.date === date);
-      const dayPlanningEntries = planningData.filter(e => e.date === date);
-
-      const actualHours = dayTimeEntries.reduce((sum, entry) => sum + (entry.workingHours || 0), 0);
-      const overtimeHours = dayTimeEntries
-        .filter(entry => entry.isOvertime)
-        .reduce((sum, entry) => sum + (entry.workingHours || 0), 0);
-
-      let plannedHours = 0;
-      dayPlanningEntries.forEach(entry => {
-        if (entry.startTime && entry.endTime && entry.type === 'work') {
-          const start = new Date(`1970-01-01T${entry.startTime}:00`);
-          const end = new Date(`1970-01-01T${entry.endTime}:00`);
-          plannedHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-        }
-      });
-
-      const variance = actualHours - plannedHours;
-
-      comparison.push({
-        date,
-        plannedHours: Math.round(plannedHours * 100) / 100,
-        actualHours: Math.round(actualHours * 100) / 100,
-        overtimeHours: Math.round(overtimeHours * 100) / 100,
-        variance: Math.round(variance * 100) / 100,
-        hasPlanning: dayPlanningEntries.length > 0,
-        hasTimeEntries: dayTimeEntries.length > 0,
-      });
-
-      totalPlannedHours += plannedHours;
-      totalActualHours += actualHours;
-      totalOvertimeHours += overtimeHours;
-    }
-
-    const totalVariance = totalActualHours - totalPlannedHours;
-
-    return {
-      employeeId,
-      period: { from: dateFrom, to: dateTo },
-      dailyComparison: comparison,
-      summary: {
-        totalPlannedHours: Math.round(totalPlannedHours * 100) / 100,
-        totalActualHours: Math.round(totalActualHours * 100) / 100,
-        totalOvertimeHours: Math.round(totalOvertimeHours * 100) / 100,
-        totalVariance: Math.round(totalVariance * 100) / 100,
-        complianceRate: totalPlannedHours > 0 ? Math.round((1 - Math.abs(totalVariance) / totalPlannedHours) * 100) : 0,
-      },
-    };
-  }
-
-  async detectTimeAnomalies(employeeId: number, dateFrom?: string, dateTo?: string): Promise<any[]> {
-    const anomalies = [];
-    
-    // Default to current week if no dates provided
-    const defaultStart = dateFrom || new Date().toISOString().split('T')[0];
-    const defaultEnd = dateTo || (() => {
-      const end = new Date(defaultStart);
-      end.setDate(end.getDate() + 6);
-      return end.toISOString().split('T')[0];
-    })();
-
-    // Get time entries and planning for the period
-    const timeEntriesData = await this.getTimeEntriesByEmployee(employeeId, undefined);
-    const planningData = await this.getPlanningEntries(defaultStart, defaultEnd, employeeId);
-    
-    // Filter time entries by date range
-    const filteredTimeEntries = timeEntriesData.filter(entry => 
-      entry.date >= defaultStart && entry.date <= defaultEnd
-    );
-
-    // Anomaly 1: Time entries without corresponding planning
-    for (const timeEntry of filteredTimeEntries) {
-      const hasPlanning = planningData.some(planning => 
-        planning.date === timeEntry.date && planning.type === 'work'
-      );
-      
-      if (!hasPlanning) {
-        anomalies.push({
-          type: 'no_planning',
-          severity: 'warning',
-          date: timeEntry.date,
-          description: `Time entry recorded without corresponding planning`,
-          suggestion: 'Create planning entry or verify if work was authorized',
-        });
-      }
-    }
-
-    // Anomaly 2: Large variance between planned and actual hours
-    const comparison = await this.compareTimeWithPlanning(employeeId, defaultStart, defaultEnd);
-    for (const day of comparison.dailyComparison) {
-      const varianceThreshold = 2; // 2 hours
-      if (Math.abs(day.variance) > varianceThreshold && day.hasPlanning) {
-        anomalies.push({
-          type: 'large_variance',
-          severity: day.variance > 0 ? 'warning' : 'info',
-          date: day.date,
-          description: `Large variance: ${day.variance > 0 ? '+' : ''}${day.variance}h vs planned`,
-          suggestion: day.variance > 0 
-            ? 'Consider if overtime was authorized'
-            : 'Check if early departure was approved',
-        });
-      }
-    }
-
-    // Anomaly 3: Missing breaks for long shifts
-    for (const timeEntry of filteredTimeEntries) {
-      if (timeEntry.workingHours > 6 && timeEntry.breakDuration < 30) {
-        anomalies.push({
-          type: 'missing_break',
-          severity: 'warning',
-          date: timeEntry.date,
-          description: `${timeEntry.workingHours}h shift with only ${timeEntry.breakDuration}min break`,
-          suggestion: 'Ensure proper break time for shifts over 6 hours',
-        });
-      }
-    }
-
-    // Anomaly 4: Overtime without approval
-    for (const timeEntry of filteredTimeEntries) {
-      if (timeEntry.isOvertime && !timeEntry.overtimeReason) {
-        anomalies.push({
-          type: 'overtime_without_approval',
-          severity: 'error',
-          date: timeEntry.date,
-          description: 'Overtime marked without justification',
-          suggestion: 'Add overtime reason or verify authorization',
-        });
-      }
-    }
-
-    return anomalies;
-  }
-
-  async getTimeEntriesSummary(employeeId?: number, period: string = 'current_month'): Promise<any> {
-    // Calculate date range based on period
-    let startDate: string;
-    let endDate: string;
-    const now = new Date();
-
-    switch (period) {
-      case 'current_week':
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay() + 1); // Monday
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6); // Sunday
-        startDate = weekStart.toISOString().split('T')[0];
-        endDate = weekEnd.toISOString().split('T')[0];
-        break;
-      case 'current_month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-        break;
-      case 'last_month':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
-        endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
-        break;
-      default:
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-    }
-
-    // Build query
-    let query = db
-      .select({
-        totalHours: sql<number>`SUM(EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0))`,
-        totalEntries: sql<number>`COUNT(*)`,
-        overtimeHours: sql<number>`SUM(CASE WHEN is_overtime THEN EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0) ELSE 0 END)`,
-        avgDailyHours: sql<number>`AVG(EXTRACT(EPOCH FROM (end_time - start_time))/3600 - (break_duration/60.0))`,
-      })
-      .from(timeEntries)
-      .where(
-        and(
-          gte(timeEntries.date, startDate),
-          lte(timeEntries.date, endDate),
-          ne(timeEntries.status, 'rejected')
-        )
-      );
-
-    if (employeeId) {
-      query = query.where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, startDate),
-          lte(timeEntries.date, endDate),
-          ne(timeEntries.status, 'rejected')
-        )
-      );
-    }
-
-    const [summary] = await query;
-
-    // Get status breakdown
-    let statusQuery = db
-      .select({
-        status: timeEntries.status,
-        count: sql<number>`COUNT(*)`,
-      })
-      .from(timeEntries)
-      .where(
-        and(
-          gte(timeEntries.date, startDate),
-          lte(timeEntries.date, endDate)
-        )
-      )
-      .groupBy(timeEntries.status);
-
-    if (employeeId) {
-      statusQuery = statusQuery.where(
-        and(
-          eq(timeEntries.employee_id, employeeId),
-          gte(timeEntries.date, startDate),
-          lte(timeEntries.date, endDate)
-        )
-      );
-    }
-
-    const statusBreakdown = await statusQuery;
-
-    return {
-      period: { start: startDate, end: endDate, type: period },
-      summary: {
-        totalHours: Math.round((summary?.totalHours || 0) * 100) / 100,
-        totalEntries: summary?.totalEntries || 0,
-        overtimeHours: Math.round((summary?.overtimeHours || 0) * 100) / 100,
-        avgDailyHours: Math.round((summary?.avgDailyHours || 0) * 100) / 100,
-      },
-      statusBreakdown: statusBreakdown.reduce((acc, item) => {
-        acc[item.status] = item.count;
-        return acc;
-      }, {} as Record<string, number>),
-    };
   }
 
   // ========================================
@@ -1807,302 +669,184 @@ export class DatabaseStorage implements IStorage {
     return department;
   }
 
-  async updateDepartment(id: number, updateDepartment: Partial<InsertDepartment>): Promise<Department | undefined> {
-    const [department] = await db
-      .update(departments)
-      .set({ ...updateDepartment, updated_at: new Date() })
-      .where(eq(departments.id, id))
-      .returning();
-    return department || undefined;
-  }
-
   // ========================================
-  // PROJECTS OPERATIONS
+  // PLANNING OPERATIONS  
   // ========================================
-  async getProject(id: number): Promise<Project | undefined> {
-    const [project] = await db.select().from(projects).where(eq(projects.id, id));
-    return project || undefined;
-  }
-
-  async getAllProjects(): Promise<Project[]> {
-    return await db.select().from(projects).orderBy(desc(projects.created_at));
-  }
-
-  async getProjectsByEmployee(employeeId: number): Promise<Project[]> {
-    return await db
+  async getPlanningEntries(
+    startDate: string,
+    endDate: string,
+    employeeId?: number,
+    departmentId?: number
+  ): Promise<any[]> {
+    let query = db
       .select({
-        id: projects.id,
-        name: projects.name,
-        description: projects.description,
-        client_name: projects.client_name,
-        status: projects.status,
-        start_date: projects.start_date,
-        end_date: projects.end_date,
-        budget: projects.budget,
-        hourly_rate: projects.hourly_rate,
-        created_by: projects.created_by,
-        created_at: projects.created_at,
-        updated_at: projects.updated_at,
+        id: planningEntries.id,
+        employeeId: planningEntries.employee_id,
+        date: planningEntries.date,
+        type: planningEntries.type,
+        startTime: planningEntries.start_time,
+        endTime: planningEntries.end_time,
+        status: planningEntries.status,
+        validatedBy: planningEntries.validated_by,
+        validatedAt: planningEntries.validated_at,
+        comments: planningEntries.comments,
+        rejectionReason: planningEntries.rejection_reason,
+        createdAt: planningEntries.created_at,
+        updatedAt: planningEntries.updated_at,
+        // Employee info
+        employeeFirstName: employees.first_name,
+        employeeLastName: employees.last_name,
+        employeeNumber: employees.employee_number,
+        // Department info
+        departmentName: departments.name,
       })
-      .from(projects)
-      .innerJoin(projectAssignments, eq(projects.id, projectAssignments.project_id))
-      .where(eq(projectAssignments.employee_id, employeeId))
-      .orderBy(desc(projects.created_at));
-  }
-
-  async createProject(insertProject: InsertProject): Promise<Project> {
-    const [project] = await db
-      .insert(projects)
-      .values(insertProject)
-      .returning();
-    return project;
-  }
-
-  async updateProject(id: number, updateProject: Partial<InsertProject>): Promise<Project | undefined> {
-    const [project] = await db
-      .update(projects)
-      .set({ ...updateProject, updated_at: new Date() })
-      .where(eq(projects.id, id))
-      .returning();
-    return project || undefined;
-  }
-
-  // ========================================
-  // PLANNING ENTRIES OPERATIONS
-  // ========================================
-  async getPlanningEntry(id: number): Promise<PlanningEntry | undefined> {
-    const [entry] = await db.select().from(planningEntries).where(eq(planningEntries.id, id));
-    return entry || undefined;
-  }
-
-  async getPlanningEntriesByEmployee(employeeId: number, startDate?: string, endDate?: string): Promise<PlanningEntry[]> {
-    if (startDate && endDate) {
-      return await db.select().from(planningEntries)
-        .where(
-          and(
-            eq(planningEntries.employee_id, employeeId),
-            gte(planningEntries.date, startDate),
-            lte(planningEntries.date, endDate)
-          )
+      .from(planningEntries)
+      .leftJoin(employees, eq(planningEntries.employee_id, employees.id))
+      .leftJoin(departments, eq(employees.department_id, departments.id))
+      .where(
+        and(
+          gte(planningEntries.date, startDate),
+          lte(planningEntries.date, endDate)
         )
-        .orderBy(asc(planningEntries.date));
+      );
+
+    if (employeeId) {
+      query = query.where(eq(planningEntries.employee_id, employeeId));
     }
-    
-    return await db.select().from(planningEntries)
-      .where(eq(planningEntries.employee_id, employeeId))
-      .orderBy(asc(planningEntries.date));
-  }
 
-  async getPlanningEntriesByStatus(status: string): Promise<PlanningEntry[]> {
-    return await db.select().from(planningEntries)
-      .where(eq(planningEntries.status, status as any))
-      .orderBy(desc(planningEntries.created_at));
-  }
+    if (departmentId) {
+      query = query.where(eq(employees.department_id, departmentId));
+    }
 
-  async createPlanningEntry(insertEntry: InsertPlanningEntry): Promise<PlanningEntry> {
-    const [entry] = await db
-      .insert(planningEntries)
-      .values(insertEntry)
-      .returning();
-    return entry;
-  }
-
-  async updatePlanningEntry(id: number, updateEntry: Partial<InsertPlanningEntry>): Promise<PlanningEntry | undefined> {
-    const [entry] = await db
-      .update(planningEntries)
-      .set({ ...updateEntry, updated_at: new Date() })
-      .where(eq(planningEntries.id, id))
-      .returning();
-    return entry || undefined;
+    return await query.orderBy(asc(planningEntries.date), asc(planningEntries.start_time));
   }
 
   // ========================================
   // TIME ENTRIES OPERATIONS
   // ========================================
-  async getTimeEntry(id: number): Promise<TimeEntry | undefined> {
-    const [entry] = await db.select().from(timeEntries).where(eq(timeEntries.id, id));
-    return entry || undefined;
-  }
-
-  async getTimeEntriesByEmployee(employeeId: number, startDate?: string, endDate?: string): Promise<TimeEntry[]> {
-    if (startDate && endDate) {
-      return await db.select().from(timeEntries)
-        .where(
-          and(
-            eq(timeEntries.employee_id, employeeId),
-            gte(timeEntries.date, startDate),
-            lte(timeEntries.date, endDate)
-          )
-        )
-        .orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
+  async getTimeEntriesWithFilters(
+    filters: {
+      startDate?: string;
+      endDate?: string;
+      employeeId?: number;
+      projectId?: number;
+      status?: string;
+      type?: string;
+      limit?: number;
+      offset?: number;
     }
-    
-    return await db.select().from(timeEntries)
-      .where(eq(timeEntries.employee_id, employeeId))
-      .orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
-  }
+  ): Promise<any[]> {
+    const conditions = [];
 
-  async getTimeEntriesByProject(projectId: number): Promise<TimeEntry[]> {
-    return await db.select().from(timeEntries)
-      .where(eq(timeEntries.project_id, projectId))
-      .orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
-  }
+    if (filters.startDate) {
+      conditions.push(gte(timeEntries.date, filters.startDate));
+    }
+    if (filters.endDate) {
+      conditions.push(lte(timeEntries.date, filters.endDate));
+    }
+    if (filters.employeeId) {
+      conditions.push(eq(timeEntries.employee_id, filters.employeeId));
+    }
+    if (filters.projectId) {
+      conditions.push(eq(timeEntries.project_id, filters.projectId));
+    }
+    if (filters.status) {
+      conditions.push(eq(timeEntries.status, filters.status));
+    }
+    if (filters.type) {
+      conditions.push(eq(timeEntries.type, filters.type));
+    }
 
-  async createTimeEntry(insertEntry: InsertTimeEntry): Promise<TimeEntry> {
-    const [entry] = await db
-      .insert(timeEntries)
-      .values(insertEntry)
-      .returning();
-    return entry;
-  }
+    let query = db
+      .select({
+        id: timeEntries.id,
+        employeeId: timeEntries.employee_id,
+        projectId: timeEntries.project_id,
+        date: timeEntries.date,
+        startTime: timeEntries.start_time,
+        endTime: timeEntries.end_time,
+        type: timeEntries.type,
+        category: timeEntries.category,
+        description: timeEntries.description,
+        status: timeEntries.status,
+        locationLatitude: timeEntries.location_latitude,
+        locationLongitude: timeEntries.location_longitude,
+        locationAddress: timeEntries.location_address,
+        validatedBy: timeEntries.validated_by,
+        validatedAt: timeEntries.validated_at,
+        createdAt: timeEntries.created_at,
+        updatedAt: timeEntries.updated_at,
+        // Employee info
+        employeeFirstName: employees.first_name,
+        employeeLastName: employees.last_name,
+        employeeNumber: employees.employee_number,
+        // Project info
+        projectName: projects.name,
+        projectClient: projects.client_name,
+      })
+      .from(timeEntries)
+      .leftJoin(employees, eq(timeEntries.employee_id, employees.id))
+      .leftJoin(projects, eq(timeEntries.project_id, projects.id));
 
-  async updateTimeEntry(id: number, updateEntry: Partial<InsertTimeEntry>): Promise<TimeEntry | undefined> {
-    const [entry] = await db
-      .update(timeEntries)
-      .set({ ...updateEntry, updated_at: new Date() })
-      .where(eq(timeEntries.id, id))
-      .returning();
-    return entry || undefined;
-  }
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
 
-  // ========================================
-  // TASKS OPERATIONS
-  // ========================================
-  async getTask(id: number): Promise<Task | undefined> {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
-    return task || undefined;
-  }
+    query = query.orderBy(desc(timeEntries.date), desc(timeEntries.start_time));
 
-  async getTasksByEmployee(employeeId: number): Promise<Task[]> {
-    return await db.select().from(tasks)
-      .where(eq(tasks.assigned_to, employeeId))
-      .orderBy(desc(tasks.created_at));
-  }
+    if (filters.limit) {
+      query = query.limit(filters.limit);
+    }
+    if (filters.offset) {
+      query = query.offset(filters.offset);
+    }
 
-  async getTasksByProject(projectId: number): Promise<Task[]> {
-    return await db.select().from(tasks)
-      .where(eq(tasks.project_id, projectId))
-      .orderBy(desc(tasks.created_at));
-  }
-
-  async createTask(insertTask: InsertTask): Promise<Task> {
-    const [task] = await db
-      .insert(tasks)
-      .values(insertTask)
-      .returning();
-    return task;
-  }
-
-  async updateTask(id: number, updateTask: Partial<InsertTask>): Promise<Task | undefined> {
-    const [task] = await db
-      .update(tasks)
-      .set({ ...updateTask, updated_at: new Date() })
-      .where(eq(tasks.id, id))
-      .returning();
-    return task || undefined;
+    return await query;
   }
 
   // ========================================
   // NOTIFICATIONS OPERATIONS
   // ========================================
-
-  async getNotification(id: number): Promise<Notification | undefined> {
-    const [notification] = await db.select().from(notifications).where(eq(notifications.id, id));
-    return notification || undefined;
-  }
-
-  async getNotificationsByUser(
-    userId: number, 
-    filters?: { page?: number; limit?: number; type?: string; read?: boolean; }
-  ): Promise<{ notifications: Notification[]; total: number; }> {
-    const page = filters?.page || 1;
-    const limit = filters?.limit || 20;
-    const offset = (page - 1) * limit;
-
-    // Build the WHERE conditions
-    let whereConditions = [eq(notifications.user_id, userId)];
-    
-    if (filters?.type) {
-      whereConditions.push(eq(notifications.type, filters.type as any));
-    }
-    
-    if (filters?.read !== undefined) {
-      if (filters.read) {
-        whereConditions.push(sql`${notifications.read_at} IS NOT NULL`);
-      } else {
-        whereConditions.push(sql`${notifications.read_at} IS NULL`);
-      }
-    }
-
-    // Get notifications with pagination
-    const notificationsList = await db
+  async getNotifications(
+    userId: number,
+    limit: number = 50,
+    offset: number = 0,
+    unreadOnly: boolean = false
+  ): Promise<Notification[]> {
+    let query = db
       .select()
       .from(notifications)
-      .where(and(...whereConditions))
+      .where(eq(notifications.user_id, userId));
+
+    if (unreadOnly) {
+      query = query.where(eq(notifications.is_read, false));
+    }
+
+    return await query
       .orderBy(desc(notifications.created_at))
       .limit(limit)
       .offset(offset);
-
-    // Get total count
-    const [{ count }] = await db
-      .select({ count: sql<number>`cast(count(*) as int)` })
-      .from(notifications)
-      .where(and(...whereConditions));
-
-    return {
-      notifications: notificationsList,
-      total: count,
-    };
   }
 
-  async createNotification(notification: InsertNotification): Promise<Notification> {
-    const [newNotification] = await db
+  async createNotification(insertNotification: InsertNotification): Promise<Notification> {
+    const [notification] = await db
       .insert(notifications)
-      .values(notification)
+      .values(insertNotification)
       .returning();
-    return newNotification;
+    return notification;
   }
 
-  async markNotificationAsRead(id: number): Promise<boolean> {
-    const result = await db
+  async markNotificationAsRead(id: number): Promise<Notification | undefined> {
+    const [notification] = await db
       .update(notifications)
-      .set({ read_at: new Date() })
-      .where(eq(notifications.id, id));
-    return result.rowCount > 0;
-  }
-
-  async markAllNotificationsAsRead(userId: number): Promise<number> {
-    const result = await db
-      .update(notifications)
-      .set({ read_at: new Date() })
-      .where(
-        and(
-          eq(notifications.user_id, userId),
-          sql`${notifications.read_at} IS NULL`
-        )
-      );
-    return result.rowCount;
-  }
-
-  async deleteNotification(id: number): Promise<boolean> {
-    const result = await db
-      .delete(notifications)
-      .where(eq(notifications.id, id));
-    return result.rowCount > 0;
-  }
-
-  async getUnreadNotificationCount(userId: number): Promise<number> {
-    const [{ count }] = await db
-      .select({ count: sql<number>`cast(count(*) as int)` })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.user_id, userId),
-          sql`${notifications.read_at} IS NULL`
-        )
-      );
-    return count;
+      .set({ is_read: true, read_at: new Date() })
+      .where(eq(notifications.id, id))
+      .returning();
+    return notification || undefined;
   }
 }
 
+// ============================================================================
+// INSTANCE CREATION
+// ============================================================================
 export const storage = new DatabaseStorage();
