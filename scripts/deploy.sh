@@ -110,6 +110,350 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         *)
+            error "Unknown option: $1"
+            ;;
+    esac
+done
+
+# Slack notification function
+send_slack_notification() {
+    local message="$1"
+    local status="$2"  # success, warning, error
+    
+    if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        local color=""
+        local emoji=""
+        
+        case $status in
+            success)
+                color="good"
+                emoji="✅"
+                ;;
+            warning)
+                color="warning"
+                emoji="⚠️"
+                ;;
+            error)
+                color="danger"
+                emoji="🚨"
+                ;;
+        esac
+        
+        curl -X POST -H 'Content-type: application/json' \
+            --data "{
+                \"attachments\": [{
+                    \"color\": \"$color\",
+                    \"text\": \"$emoji ClockPilot Deployment - $message\",
+                    \"fields\": [
+                        {\"title\": \"Environment\", \"value\": \"$ENVIRONMENT\", \"short\": true},
+                        {\"title\": \"Timestamp\", \"value\": \"$(date)\", \"short\": true},
+                        {\"title\": \"Host\", \"value\": \"$(hostname)\", \"short\": true}
+                    ]
+                }]
+            }" \
+            "$SLACK_WEBHOOK_URL" > /dev/null 2>&1 || warn "Failed to send Slack notification"
+    fi
+}
+
+# SSL certificate check
+check_ssl_certificates() {
+    info "Checking SSL certificates..."
+    
+    if [ -f "$SSL_CERT_PATH" ] && [ -f "$SSL_KEY_PATH" ]; then
+        # Check certificate expiration
+        cert_expiry=$(openssl x509 -in "$SSL_CERT_PATH" -noout -enddate | cut -d= -f2)
+        expiry_timestamp=$(date -d "$cert_expiry" +%s)
+        current_timestamp=$(date +%s)
+        days_until_expiry=$(( (expiry_timestamp - current_timestamp) / 86400 ))
+        
+        if [ $days_until_expiry -lt 30 ]; then
+            warn "SSL certificate expires in $days_until_expiry days"
+            send_slack_notification "SSL certificate expires in $days_until_expiry days" "warning"
+        else
+            log "SSL certificate valid for $days_until_expiry days"
+        fi
+        
+        # Verify certificate and key match
+        cert_hash=$(openssl x509 -noout -modulus -in "$SSL_CERT_PATH" | openssl md5)
+        key_hash=$(openssl rsa -noout -modulus -in "$SSL_KEY_PATH" | openssl md5)
+        
+        if [ "$cert_hash" != "$key_hash" ]; then
+            error "SSL certificate and key do not match!"
+        fi
+        
+        log "SSL certificates validated successfully"
+    else
+        warn "SSL certificates not found, skipping SSL check"
+    fi
+}
+
+# Database migration check and execution
+run_migrations() {
+    info "Running database migrations..."
+    
+    # Check if database is accessible
+    if ! npm run db:test > /dev/null 2>&1; then
+        error "Database connection failed"
+    fi
+    
+    # Run migrations
+    if npm run db:push; then
+        log "Database migrations completed successfully"
+    else
+        error "Database migrations failed"
+    fi
+}
+
+# Cache warming
+warm_cache() {
+    info "Warming application cache..."
+    
+    # Wait for application to be ready
+    sleep 10
+    
+    # Warm critical endpoints
+    cache_endpoints=(
+        "/api/health"
+        "/api/auth/status"
+        "/api/employees"
+        "/api/planning"
+    )
+    
+    for endpoint in "${cache_endpoints[@]}"; do
+        curl -s "$BASE_URL$endpoint" > /dev/null 2>&1 || warn "Failed to warm cache for $endpoint"
+    done
+    
+    log "Cache warming completed"
+}
+
+# Health checks
+run_health_checks() {
+    info "Running comprehensive health checks..."
+    
+    # Check application health
+    if ! curl -f -s "$BASE_URL/api/health" > /dev/null; then
+        error "Application health check failed"
+    fi
+    
+    # Check database health
+    if ! curl -f -s "$BASE_URL/api/health/database" > /dev/null; then
+        error "Database health check failed"
+    fi
+    
+    # Check critical services
+    services=("app" "postgres" "redis")
+    
+    for service in "${services[@]}"; do
+        if docker-compose ps $service | grep -q "Up"; then
+            log "Service $service is running"
+        else
+            error "Service $service is not running"
+        fi
+    done
+    
+    log "All health checks passed"
+}
+
+# Backup function
+create_backup() {
+    info "Creating backup before deployment..."
+    
+    mkdir -p "$BACKUP_DIR"
+    
+    # Database backup
+    if ! ./scripts/backup-db.sh; then
+        error "Database backup failed"
+    fi
+    
+    # Application backup
+    tar -czf "$BACKUP_DIR/app_backup_$TIMESTAMP.tar.gz" \
+        --exclude=node_modules \
+        --exclude=.git \
+        --exclude=logs \
+        --exclude=uploads \
+        --exclude=backups \
+        "$PROJECT_ROOT"
+    
+    log "Backup created: app_backup_$TIMESTAMP.tar.gz"
+}
+
+# Rollback function
+rollback_deployment() {
+    info "Rolling back to previous version..."
+    
+    # Find latest backup
+    latest_backup=$(ls -t "$BACKUP_DIR"/app_backup_*.tar.gz 2>/dev/null | head -n1)
+    
+    if [ -z "$latest_backup" ]; then
+        error "No backup found for rollback"
+    fi
+    
+    # Stop services
+    docker-compose down
+    
+    # Restore from backup
+    tar -xzf "$latest_backup" -C /tmp/
+    rsync -av --exclude=node_modules /tmp/$(basename "$PROJECT_ROOT")/ "$PROJECT_ROOT/"
+    
+    # Restore dependencies
+    npm install --production
+    
+    # Start services
+    docker-compose up -d
+    
+    # Verify rollback
+    sleep 30
+    run_health_checks
+    
+    log "Rollback completed successfully"
+    send_slack_notification "Rollback completed successfully" "success"
+}
+
+# Main deployment function
+deploy() {
+    info "Starting ClockPilot deployment to $ENVIRONMENT..."
+    send_slack_notification "Deployment started" "warning"
+    
+    # Pre-deployment checks
+    if [ "$ENVIRONMENT" = "production" ] && [ "$FORCE" = false ]; then
+        read -p "Are you sure you want to deploy to PRODUCTION? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Deployment cancelled by user"
+            exit 0
+        fi
+    fi
+    
+    # Environment validation
+    if [ ! -f ".env.$ENVIRONMENT" ]; then
+        error "Environment file .env.$ENVIRONMENT not found"
+    fi
+    
+    # Copy environment file
+    cp ".env.$ENVIRONMENT" .env
+    
+    # Validate environment
+    if ! ./scripts/check-env.sh; then
+        error "Environment validation failed"
+    fi
+    
+    # SSL certificate check
+    check_ssl_certificates
+    
+    # Create backup
+    create_backup
+    
+    # Pull latest code
+    info "Pulling latest code..."
+    git pull origin main
+    
+    # Install dependencies
+    info "Installing dependencies..."
+    npm ci --production
+    
+    # Build application
+    info "Building application..."
+    npm run build
+    
+    # Run migrations
+    run_migrations
+    
+    # Stop old containers
+    info "Stopping old containers..."
+    docker-compose down
+    
+    # Build and start new containers
+    info "Building and starting new containers..."
+    docker-compose build --no-cache
+    docker-compose up -d
+    
+    # Wait for services to be ready
+    info "Waiting for services to start..."
+    sleep 30
+    
+    # Run health checks
+    run_health_checks
+    
+    # Warm cache
+    warm_cache
+    
+    # Final verification
+    info "Running final verification..."
+    sleep 10
+    run_health_checks
+    
+    log "Deployment completed successfully!"
+    send_slack_notification "Deployment completed successfully" "success"
+    
+    # Cleanup old backups (keep last 10)
+    ls -t "$BACKUP_DIR"/app_backup_*.tar.gz 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+}
+
+# Main execution
+main() {
+    cd "$PROJECT_ROOT"
+    
+    # Load environment
+    if [ -f ".env" ]; then
+        source .env
+    fi
+    
+    info "ClockPilot Deployment Script - Environment: $ENVIRONMENT"
+    
+    # Execute based on options
+    if [ "$CHECK_ONLY" = true ]; then
+        run_health_checks
+        exit 0
+    elif [ "$BACKUP_ONLY" = true ]; then
+        create_backup
+        exit 0
+    elif [ "$ROLLBACK" = true ]; then
+        rollback_deployment
+        exit 0
+    else
+        deploy
+    fi
+}
+
+# Error handling
+trap 'error "Deployment failed with exit code $?"' ERR
+
+# Run main function
+main "$@"
+FORCE=false
+ENVIRONMENT="production"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help)
+            show_help
+            exit 0
+            ;;
+        --backup-only)
+            BACKUP_ONLY=true
+            shift
+            ;;
+        --rollback)
+            ROLLBACK=true
+            shift
+            ;;
+        --check-only)
+            CHECK_ONLY=true
+            shift
+            ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --staging)
+            ENVIRONMENT="staging"
+            shift
+            ;;
+        --production)
+            ENVIRONMENT="production"
+            shift
+            ;;
+        *)
             error "Unknown option: $1. Use --help for usage information."
             ;;
     esac

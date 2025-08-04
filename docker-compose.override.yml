@@ -1,0 +1,110 @@
+# ClockPilot Local Development Override
+# This file extends docker-compose.yml for local development
+# Changes here won't affect production deployments
+
+version: '3.8'
+
+services:
+  app:
+    # Development-specific overrides
+    volumes:
+      # Enable hot reloading for development
+      - ./:/app
+      - /app/node_modules
+      # Local storage for uploads during development
+      - ./uploads:/app/uploads
+    environment:
+      # Development environment variables
+      NODE_ENV: development
+      DEBUG: clockpilot:*
+      LOG_LEVEL: debug
+      # Disable some production features for local dev
+      ENABLE_SSL: false
+      ENABLE_RATE_LIMITING: false
+      ENABLE_COMPRESSION: false
+    ports:
+      # Expose additional ports for debugging
+      - "5000:5000"  # Main app
+      - "9229:9229"  # Node.js debugger
+    command: npm run dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    # Development database settings
+    environment:
+      POSTGRES_DB: clockpilot_dev
+      POSTGRES_USER: clockpilot_dev
+      POSTGRES_PASSWORD: dev_password_123
+    ports:
+      - "5433:5432"  # Avoid conflicts with local PostgreSQL
+    volumes:
+      # Persist data but use named volume for easier reset
+      - postgres_dev_data:/var/lib/postgresql/data
+      # Development SQL scripts
+      - ./scripts/sql/dev-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+
+  redis:
+    # Development Redis settings
+    ports:
+      - "6380:6379"  # Avoid conflicts with local Redis
+    volumes:
+      - redis_dev_data:/data
+    command: redis-server --appendonly yes --requirepass dev_redis_123
+
+  # Additional development services
+  mailhog:
+    # Local email testing
+    image: mailhog/mailhog:latest
+    container_name: clockpilot_mailhog
+    ports:
+      - "8025:8025"  # Web UI
+      - "1025:1025"  # SMTP
+    environment:
+      MH_STORAGE: maildir
+      MH_MAILDIR_PATH: /maildir
+    volumes:
+      - mailhog_data:/maildir
+
+  pgadmin:
+    # Database administration interface
+    image: dpage/pgadmin4:latest
+    container_name: clockpilot_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@clockpilot.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
+  redis-commander:
+    # Redis administration interface
+    image: rediscommander/redis-commander:latest
+    container_name: clockpilot_redis_commander
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:dev_redis_123
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+  mailhog_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  default:
+    name: clockpilot_dev_network
