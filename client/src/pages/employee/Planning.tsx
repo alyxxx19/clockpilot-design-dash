@@ -918,32 +918,28 @@ export const Planning: React.FC = () => {
                   Aujourd'hui
                 </Button>
                 <ExportButton 
-                  type="planning" 
-                  options={{
-                    dateRange: viewMode === 'mois' ? {
-                      start: new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString().split('T')[0],
-                      end: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).toISOString().split('T')[0]
-                    } : viewMode === 'semaine' ? {
-                      start: (() => {
+                  defaultExportType="planning"
+                  defaultDateRange={{
+                    start: viewMode === 'mois' ? 
+                      new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).toISOString().split('T')[0] :
+                      viewMode === 'semaine' ? (() => {
                         const startOfWeek = new Date(currentDate);
                         const day = startOfWeek.getDay();
                         const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
                         startOfWeek.setDate(diff);
                         return startOfWeek.toISOString().split('T')[0];
-                      })(),
-                      end: (() => {
+                      })() : currentDate.toISOString().split('T')[0],
+                    end: viewMode === 'mois' ? 
+                      new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).toISOString().split('T')[0] :
+                      viewMode === 'semaine' ? (() => {
                         const startOfWeek = new Date(currentDate);
                         const day = startOfWeek.getDay();
                         const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
                         startOfWeek.setDate(diff + 6);
                         return startOfWeek.toISOString().split('T')[0];
-                      })()
-                    } : {
-                      start: currentDate.toISOString().split('T')[0],
-                      end: currentDate.toISOString().split('T')[0]
-                    }
+                      })() : currentDate.toISOString().split('T')[0]
                   }}
-                  className="size-sm"
+                  className="h-9"
                 />
               </div>
             </div>

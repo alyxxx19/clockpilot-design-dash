@@ -1,0 +1,83 @@
+#4 - [SÉCURITÉ] - PRIORITÉ: CRITIQUE
+Résumé: Variables d'environnement sensibles exposées dans le code
+Détails:
+
+Fichier(s) concerné(s): /.env.example, /server/index.ts, /server/routes.ts
+Lignes: Multiples
+Nature du problème: Pas de validation des variables d'environnement, secrets potentiellement hardcodés
+Impact: Fuite potentielle de données sensibles
+Contexte: Manque de couche de validation environnement
+
+Solution proposée:
+Implémenter une validation stricte des variables d'environnement
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+TÂCHE: Créer une validation sécurisée des variables d'environnement
+CRÉER FICHIER: /lib/env.ts
+typescriptimport { z } from 'zod'
+
+const envSchema = z.object({
+  // Base
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.string().transform(Number).default('5000'),
+  BASE_URL: z.string().url().optional(),
+  
+  // Database
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  
+  // Auth
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+  SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters'),
+  
+  // Email
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().transform(Number).optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  EMAIL_FROM: z.string().email().optional(),
+  
+  // Features
+  ENABLE_GEOLOCATION: z.string().transform(v => v === 'true').default('false'),
+  ENABLE_OFFLINE_MODE: z.string().transform(v => v === 'true').default('false'),
+  ENABLE_PUSH_NOTIFICATIONS: z.string().transform(v => v === 'true').default('false'),
+})
+
+type Env = z.infer<typeof envSchema>
+
+// Valider au démarrage
+const parseEnv = (): Env => {
+  try {
+    return envSchema.parse(process.env)
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      console.error('❌ Environment validation failed:')
+      error.errors.forEach(err => {
+        console.error(`   ${err.path.join('.')}: ${err.message}`)
+      })
+      process.exit(1)
+    }
+    throw error
+  }
+}
+
+export const env = parseEnv()
+
+// Exporter le type pour TypeScript
+export type { Env }
+METTRE À JOUR: Tous les fichiers utilisant process.env directement
+
+Remplacer process.env.X par env.X
+Importer depuis '@/lib/env'
+
+CRÉER FICHIER: /.env.local.example (pour le développement)
+
+Copier .env.example
+Ajouter des valeurs de développement sûres
+NE JAMAIS commiter .env.local
+"""
+
+Dépendances:
+
+Doit être corrigé après: #1
+Permettra de débloquer: Déploiement sécurisé
