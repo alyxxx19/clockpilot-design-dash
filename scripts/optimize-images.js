@@ -28,42 +28,77 @@ async function optimizeImage(inputPath, outputPath) {
     const ext = path.extname(inputPath).toLowerCase();
     
     if (ext === '.png') {
-      // Optimiser PNG avec Sharp puis pngquant
-      await sharp(inputPath)
-        .resize(TARGET_WIDTH, TARGET_HEIGHT, {
-          fit: 'inside',
-          withoutEnlargement: true
-        })
-        .png({ quality: 90 })
-        .toFile(outputPath + '.temp');
-      
-      // Compression avancée avec pngquant
-      const optimized = await imagemin([outputPath + '.temp'], {
-        destination: path.dirname(outputPath),
-        plugins: [
-          imageminPngquant({
-            quality: [0.6, 0.8]
+      // Try Sharp + pngquant first, fallback to Sharp only if pngquant fails
+      try {
+        await sharp(inputPath)
+          .resize(TARGET_WIDTH, TARGET_HEIGHT, {
+            fit: 'inside',
+            withoutEnlargement: true
           })
-        ]
-      });
-      
-      // Nettoyer le fichier temporaire
-      await fs.unlink(outputPath + '.temp');
-      
-      return optimized[0];
+          .png({ quality: 90 })
+          .toFile(outputPath + '.temp');
+        
+        // Compression avancée avec pngquant
+        const optimized = await imagemin([outputPath + '.temp'], {
+          destination: path.dirname(outputPath),
+          plugins: [
+            imageminPngquant({
+              quality: [0.6, 0.8]
+            })
+          ]
+        });
+        
+        // Nettoyer le fichier temporaire
+        await fs.unlink(outputPath + '.temp');
+        
+        return optimized[0];
+      } catch (pngquantError) {
+        // Fallback to Sharp-only optimization if pngquant fails
+        console.warn(`pngquant failed for ${inputPath}, using Sharp-only optimization`);
+        
+        // Nettoyer le fichier temporaire si il existe
+        try {
+          await fs.unlink(outputPath + '.temp');
+        } catch {}
+        
+        // Use a temporary output file to avoid Sharp input/output conflict
+        const tempOptimized = outputPath + '.optimized';
+        await sharp(inputPath)
+          .resize(TARGET_WIDTH, TARGET_HEIGHT, {
+            fit: 'inside',
+            withoutEnlargement: true
+          })
+          .png({ 
+            quality: 80,
+            compressionLevel: 9,
+            effort: 10
+          })
+          .toFile(tempOptimized);
+        
+        // Replace original file with optimized version
+        await fs.rename(tempOptimized, outputPath);
+        
+        return { outputPath };
+      }
     } else if (ext === '.gif') {
-      // Optimiser GIF
-      const optimized = await imagemin([inputPath], {
-        destination: path.dirname(outputPath),
-        plugins: [
-          imageminGifsicle({
-            optimizationLevel: 3,
-            colors: 64
-          })
-        ]
-      });
-      
-      return optimized[0];
+      // Try gifsicle optimization, fallback to copy if it fails
+      try {
+        const optimized = await imagemin([inputPath], {
+          destination: path.dirname(outputPath),
+          plugins: [
+            imageminGifsicle({
+              optimizationLevel: 3,
+              colors: 64
+            })
+          ]
+        });
+        
+        return optimized[0];
+      } catch (gifsicleError) {
+        console.warn(`gifsicle failed for ${inputPath}, copying file without optimization`);
+        await fs.copyFile(inputPath, outputPath);
+        return { outputPath };
+      }
     }
   } catch (error) {
     console.error(`Erreur lors de l'optimisation de ${inputPath}:`, error);

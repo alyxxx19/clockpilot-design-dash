@@ -1,0 +1,230 @@
+#3 - [FONCTIONNALITÉS INCOMPLÈTES] - PRIORITÉ: HAUTE
+Résumé: Page employee/my-planning incomplète avec imports manquants
+Détails:
+
+Fichier(s) concerné(s): /app/employee/my-planning/page.tsx
+Lignes: 44, fin du fichier
+Nature du problème: Déclaration de variable incomplète et fichier tronqué
+Impact: La page ne compile pas
+Contexte: Le fichier semble avoir été coupé en plein milieu
+
+Code problématique:
+typescriptconst [savedEntries, setSavedEntries] = useState<SavedTimeEntry[]>([])
+const interval // Ligne incomplète
+// Fichier se termine brusquement
+Solution proposée:
+Compléter l'implémentation de la page
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+FICHIER: /app/employee/my-planning/page.tsx
+PROBLÈME: Le fichier est incomplet avec une déclaration de variable tronquée à la ligne 44
+CORRECTION COMPLÈTE:
+typescript"use client"
+
+import { useState, useMemo, useEffect, memo, useCallback } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardTitle } from "@/components/ui/card"
+import type { SavedTimeEntry, GroupedTimeSlot, DailyPlanningDay } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import {
+  format,
+  startOfWeek,
+  endOfWeek,
+  addDays,
+  subDays,
+  startOfMonth,
+  endOfMonth,
+  addMonths,
+  subMonths,
+} from "date-fns"
+import { fr } from "date-fns/locale"
+import { getSavedTimeEntries } from "@/actions/time-entry"
+import { calculateEmployeeDashboardMetrics } from "@/lib/data"
+
+const getStatusClasses = (day: DailyPlanningDay) => {
+  if (day.isToday) {
+    return "bg-blue-500 text-white shadow-md"
+  }
+  switch (day.status) {
+    case "validated":
+      return "border-2 border-green-500 bg-green-50 text-green-900"
+    case "pending":
+      return "border-2 border-yellow-500 bg-yellow-50 text-yellow-900"
+    case "rejected":
+      return "border-2 border-red-500 bg-red-50 text-red-900"
+    case "empty":
+    default:
+      return "bg-gray-100 text-gray-800 border border-gray-200"
+  }
+}
+
+const MyPlanningPage = memo(function MyPlanningPage() {
+  const [viewMode, setViewMode] = useState<"day" | "week" | "month">("week")
+  const [currentPeriodStart, setCurrentPeriodStart] = useState<Date>(new Date())
+  const [savedEntries, setSavedEntries] = useState<SavedTimeEntry[]>([])
+  const intervalMinutes = 30 // Compléter la déclaration
+
+  // Charger les entrées sauvegardées
+  useEffect(() => {
+    const loadEntries = async () => {
+      const start = startOfMonth(currentPeriodStart)
+      const end = endOfMonth(currentPeriodStart)
+      const entries = await getSavedTimeEntries(
+        format(start, 'yyyy-MM-dd'),
+        format(end, 'yyyy-MM-dd')
+      )
+      setSavedEntries(entries)
+    }
+    loadEntries()
+  }, [currentPeriodStart])
+
+  // Calculer les métriques
+  const metrics = useMemo(() => {
+    return calculateEmployeeDashboardMetrics(
+      savedEntries,
+      currentPeriodStart,
+      viewMode,
+      intervalMinutes
+    )
+  }, [savedEntries, currentPeriodStart, viewMode, intervalMinutes])
+
+  // Handlers de navigation
+  const navigatePrevious = useCallback(() => {
+    switch (viewMode) {
+      case 'day':
+        setCurrentPeriodStart(prev => subDays(prev, 1))
+        break
+      case 'week':
+        setCurrentPeriodStart(prev => subDays(prev, 7))
+        break
+      case 'month':
+        setCurrentPeriodStart(prev => subMonths(prev, 1))
+        break
+    }
+  }, [viewMode])
+
+  const navigateNext = useCallback(() => {
+    switch (viewMode) {
+      case 'day':
+        setCurrentPeriodStart(prev => addDays(prev, 1))
+        break
+      case 'week':
+        setCurrentPeriodStart(prev => addDays(prev, 7))
+        break
+      case 'month':
+        setCurrentPeriodStart(prev => addMonths(prev, 1))
+        break
+    }
+  }, [viewMode])
+
+  const navigateToday = useCallback(() => {
+    setCurrentPeriodStart(new Date())
+  }, [])
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Mon Planning</h1>
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === 'day' ? 'default' : 'outline'}
+            onClick={() => setViewMode('day')}
+          >
+            Jour
+          </Button>
+          <Button
+            variant={viewMode === 'week' ? 'default' : 'outline'}
+            onClick={() => setViewMode('week')}
+          >
+            Semaine
+          </Button>
+          <Button
+            variant={viewMode === 'month' ? 'default' : 'outline'}
+            onClick={() => setViewMode('month')}
+          >
+            Mois
+          </Button>
+        </div>
+      </div>
+
+      {/* Navigation temporelle */}
+      <div className="flex justify-between items-center">
+        <Button onClick={navigatePrevious} variant="outline">
+          Précédent
+        </Button>
+        <Button onClick={navigateToday} variant="outline">
+          Aujourd'hui
+        </Button>
+        <Button onClick={navigateNext} variant="outline">
+          Suivant
+        </Button>
+      </div>
+
+      {/* Affichage du planning selon le mode */}
+      <Card>
+        <CardContent className="p-6">
+          {viewMode === 'day' && (
+            <DayView 
+              date={currentPeriodStart}
+              planning={metrics.dynamicPlanning}
+            />
+          )}
+          {viewMode === 'week' && (
+            <WeekView 
+              weekStart={startOfWeek(currentPeriodStart, { locale: fr })}
+              planning={metrics.dynamicPlanning}
+            />
+          )}
+          {viewMode === 'month' && (
+            <MonthView 
+              monthStart={startOfMonth(currentPeriodStart)}
+              planning={metrics.dynamicPlanning}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Résumé des statistiques */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <CardTitle className="text-sm">Heures aujourd'hui</CardTitle>
+            <p className="text-2xl font-bold">{metrics.dynamicStats.todayHours}h</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <CardTitle className="text-sm">Heures cette semaine</CardTitle>
+            <p className="text-2xl font-bold">{metrics.dynamicStats.weekHours}h</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <CardTitle className="text-sm">Heures ce mois</CardTitle>
+            <p className="text-2xl font-bold">{metrics.dynamicStats.monthHours}h</p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+})
+
+// Composants de vue (à implémenter)
+function DayView({ date, planning }: any) {
+  return <div>Vue jour à implémenter</div>
+}
+
+function WeekView({ weekStart, planning }: any) {
+  return <div>Vue semaine à implémenter</div>
+}
+
+function MonthView({ monthStart, planning }: any) {
+  return <div>Vue mois à implémenter</div>
+}
+
+export default MyPlanningPage
+"""
+Dépendances:
+
+Doit être corrigé après: #1
+Permettra de débloquer: Fonctionnalité planning employé
