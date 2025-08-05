@@ -1,18 +1,19 @@
 import Redis from 'ioredis';
 import logger from './logger';
+import { env } from '../shared/env';
 
 // Configuration Redis
 const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD,
-  db: parseInt(process.env.REDIS_DB || '0'),
+  host: env.REDIS_HOST,
+  port: env.REDIS_PORT,
+  password: env.REDIS_PASSWORD,
+  db: 0, // Default database
   retryDelayOnFailover: 100,
   enableReadyCheck: true,
   maxRetriesPerRequest: 3,
   lazyConnect: true,
   // Configuration pour la production
-  keyPrefix: `clockpilot:${process.env.NODE_ENV || 'dev'}:`,
+  keyPrefix: `clockpilot:${env.NODE_ENV}:`,
 };
 
 // Instance Redis principale

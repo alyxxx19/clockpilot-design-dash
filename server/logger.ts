@@ -1,5 +1,6 @@
 import winston from 'winston';
 import path from 'path';
+import { env } from '../shared/env';
 
 // Create logs directory if it doesn't exist
 const logsDir = path.join(process.cwd(), 'logs');
@@ -40,12 +41,12 @@ winston.addColors(colors);
 
 // Create the logger
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: env.LOG_LEVEL,
   levels,
   format: logFormat,
   defaultMeta: {
     service: 'clockpilot',
-    environment: process.env.NODE_ENV || 'development',
+    environment: env.NODE_ENV,
   },
   transports: [
     // Error log file
@@ -84,7 +85,7 @@ const logger = winston.createLogger({
 });
 
 // Add console transport for development
-if (process.env.NODE_ENV !== 'production') {
+if (env.NODE_ENV !== 'production') {
   logger.add(new winston.transports.Console({
     format: winston.format.combine(
       winston.format.colorize({ all: true }),
@@ -102,7 +103,7 @@ export const securityLogger = winston.createLogger({
   format: logFormat,
   defaultMeta: {
     service: 'clockpilot-security',
-    environment: process.env.NODE_ENV || 'development',
+    environment: env.NODE_ENV,
   },
   transports: [
     new winston.transports.File({
@@ -119,7 +120,7 @@ export const performanceLogger = winston.createLogger({
   format: logFormat,
   defaultMeta: {
     service: 'clockpilot-performance',
-    environment: process.env.NODE_ENV || 'development',
+    environment: env.NODE_ENV,
   },
   transports: [
     new winston.transports.File({
@@ -136,7 +137,7 @@ export const auditLogger = winston.createLogger({
   format: logFormat,
   defaultMeta: {
     service: 'clockpilot-audit',
-    environment: process.env.NODE_ENV || 'development',
+    environment: env.NODE_ENV,
   },
   transports: [
     new winston.transports.File({

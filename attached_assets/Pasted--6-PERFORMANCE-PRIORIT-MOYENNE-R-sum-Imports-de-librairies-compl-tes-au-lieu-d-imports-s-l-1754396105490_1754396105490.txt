@@ -1,0 +1,78 @@
+#6 - [PERFORMANCE] - PRIORITÉ: MOYENNE
+Résumé: Imports de librairies complètes au lieu d'imports sélectifs
+Détails:
+
+Fichier(s) concerné(s): /app/employee/dashboard/page.tsx, /lib/data.ts
+Lignes: Imports date-fns
+Nature du problème: Import de toute la librairie date-fns au lieu des fonctions spécifiques
+Impact: Bundle size plus large, temps de chargement augmenté
+Contexte: Mauvaise pratique d'import
+
+Code problématique:
+typescriptimport {
+  format,
+  startOfWeek,
+  endOfWeek,
+  // ... 10+ imports
+} from "date-fns"
+Solution proposée:
+Optimiser les imports et lazy-loading
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+TÂCHE: Optimiser les imports et la performance
+
+ANALYSER tous les fichiers utilisant date-fns
+Pour chaque fichier, vérifier quelles fonctions sont réellement utilisées
+Créer un fichier utilitaire centralisé pour les fonctions date
+
+CRÉER: /lib/date-utils.ts
+typescript// Imports optimisés - seulement ce qui est nécessaire
+import format from 'date-fns/format'
+import startOfWeek from 'date-fns/startOfWeek'
+import endOfWeek from 'date-fns/endOfWeek'
+import startOfMonth from 'date-fns/startOfMonth'
+import endOfMonth from 'date-fns/endOfMonth'
+import addDays from 'date-fns/addDays'
+import subDays from 'date-fns/subDays'
+import { fr } from 'date-fns/locale'
+
+// Ré-exporter avec configuration locale
+export const formatDate = (date: Date, pattern: string) => 
+  format(date, pattern, { locale: fr })
+
+export const getWeekBounds = (date: Date) => ({
+  start: startOfWeek(date, { locale: fr }),
+  end: endOfWeek(date, { locale: fr })
+})
+
+export const getMonthBounds = (date: Date) => ({
+  start: startOfMonth(date),
+  end: endOfMonth(date)
+})
+
+export { addDays, subDays }
+
+METTRE À JOUR tous les imports dans les composants:
+
+typescript// Avant
+import { format, startOfWeek, endOfWeek } from "date-fns"
+import { fr } from "date-fns/locale"
+
+// Après
+import { formatDate, getWeekBounds } from "@/lib/date-utils"
+
+AJOUTER lazy loading pour les composants lourds:
+
+typescript// Dans les pages avec des graphiques
+const DashboardCharts = dynamic(
+  () => import('@/components/dashboard-charts'),
+  { 
+    loading: () => <div>Chargement des graphiques...</div>,
+    ssr: false 
+  }
+)
+"""
+Dépendances:
+
+Doit être corrigé après: #1, #3
+Permettra de débloquer: Performance optimale
