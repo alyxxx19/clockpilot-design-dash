@@ -2501,17 +2501,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // ========================================
-  // HEALTH CHECK
-  // ========================================
-  app.get('/api/health', (req: Request, res: Response) => {
-    res.json({
-      status: 'OK',
-      timestamp: new Date().toISOString(),
-      service: 'ClockPilot API',
-      version: '1.0.0'
-    });
-  });
+  // Health check routes are handled by monitoring middleware
 
   // ========================================
   // NOTIFICATIONS API ENDPOINTS

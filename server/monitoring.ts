@@ -1,6 +1,7 @@
 import express from 'express';
 import { db, pool } from './db';
 import { redis, cacheService } from './redis';
+import { sql } from 'drizzle-orm';
 import os from 'os';
 import process from 'process';
 import logger from './logger';
@@ -56,7 +57,7 @@ class HealthMonitor {
   async checkDatabase(): Promise<HealthCheck> {
     const startTime = Date.now();
     try {
-      await db.execute({ sql: 'SELECT 1', args: [] });
+      await db.execute(sql`SELECT 1`);
       const responseTime = Date.now() - startTime;
       
       return {
