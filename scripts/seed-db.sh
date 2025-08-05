@@ -14,6 +14,11 @@ DB_NAME="clockpilot"
 DB_USER="clockpilot_user"
 ENVIRONMENT="${ENVIRONMENT:-development}"
 
+# Default password hash for development (password: "password123")
+# Override with SEED_PASSWORD_HASH environment variable for custom password
+DEFAULT_PASSWORD_HASH='$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze'
+PASSWORD_HASH="${SEED_PASSWORD_HASH:-$DEFAULT_PASSWORD_HASH}"
+
 # Couleurs
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -103,7 +108,7 @@ EOF
 create_base_data() {
     log "Création des données de base..."
     
-    docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" << 'EOF'
+    docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" << EOF
 -- Insérer les départements
 INSERT INTO departments (name, description, created_at, updated_at) VALUES
 ('Direction', 'Direction générale et management', NOW(), NOW()),
@@ -116,13 +121,13 @@ INSERT INTO departments (name, description, created_at, updated_at) VALUES
 
 -- Insérer les utilisateurs (mots de passe hashés avec bcrypt pour "password123")
 INSERT INTO users (email, password_hash, first_name, last_name, role, created_at, updated_at) VALUES
-('admin@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Admin', 'System', 'admin', NOW(), NOW()),
-('manager.rh@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Marie', 'Dubois', 'manager', NOW(), NOW()),
-('manager.dev@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Jean', 'Martin', 'manager', NOW(), NOW()),
-('employee.dev1@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Sophie', 'Durand', 'employee', NOW(), NOW()),
-('employee.dev2@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Pierre', 'Bernard', 'employee', NOW(), NOW()),
-('employee.marketing@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Emma', 'Rousseau', 'employee', NOW(), NOW()),
-('employee.support@clockpilot.com', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze', 'Lucas', 'Moreau', 'employee', NOW(), NOW());
+('admin@clockpilot.com', '$PASSWORD_HASH', 'Admin', 'System', 'admin', NOW(), NOW()),
+('manager.rh@clockpilot.com', '$PASSWORD_HASH', 'Marie', 'Dubois', 'manager', NOW(), NOW()),
+('manager.dev@clockpilot.com', '$PASSWORD_HASH', 'Jean', 'Martin', 'manager', NOW(), NOW()),
+('employee.dev1@clockpilot.com', '$PASSWORD_HASH', 'Sophie', 'Durand', 'employee', NOW(), NOW()),
+('employee.dev2@clockpilot.com', '$PASSWORD_HASH', 'Pierre', 'Bernard', 'employee', NOW(), NOW()),
+('employee.marketing@clockpilot.com', '$PASSWORD_HASH', 'Emma', 'Rousseau', 'employee', NOW(), NOW()),
+('employee.support@clockpilot.com', '$PASSWORD_HASH', 'Lucas', 'Moreau', 'employee', NOW(), NOW());
 EOF
     
     success "Données de base créées"
