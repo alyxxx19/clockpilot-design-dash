@@ -83,3 +83,9 @@ This is a full-stack JavaScript application designed to manage employee data, pl
 - **GIF Creation System**: Automated workflow animations for punch process, drag-drop planning, validation flow, and export generation
 - **Documentation Infrastructure**: Organized screenshot folders, README documentation, Python placeholder generator, SQL demo data
 - **Development Workflow**: Complete setup guide, CI/CD integration, maintenance procedures, and troubleshooting documentation
+
+## Security Updates & Dependency Management (2025-08-05)
+- **Dependency Security Updates**: Applied security updates for imagemin-gifsicle (7.0.0 → 5.2.0) and imagemin-pngquant (10.0.0 → 5.0.1)
+- **Compatibility Fixes**: Updated scripts/optimize-images.js to handle API changes in downgraded dependencies with proper ES module export handling
+- **Core Functionality**: Verified Sharp image processing for avatar/logo uploads still works correctly with updated dependencies
+- **Testing & Verification**: Confirmed all image optimization workflows function properly with security-patched dependency versions

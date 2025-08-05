@@ -4,17 +4,21 @@
  */
 
 import sharp from 'sharp';
-import imagemin from 'imagemin';
-import imageminPngquant from 'imagemin-pngquant';
+import imageminModule from 'imagemin';
+import imageminPngquantModule from 'imagemin-pngquant';
 import imageminGifsicle from 'imagemin-gifsicle';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Handle different export patterns for downgraded dependencies
+const imagemin = imageminModule.default || imageminModule;
+const imageminPngquant = imageminPngquantModule.default || imageminPngquantModule;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SCREENSHOTS_DIR = 'docs/screenshots';
+const SCREENSHOTS_DIR = path.join(__dirname, '..', 'docs', 'screenshots');
 const TARGET_WIDTH = 1200;
 const TARGET_HEIGHT = 800;
 const MAX_FILE_SIZE = 500 * 1024; // 500KB
