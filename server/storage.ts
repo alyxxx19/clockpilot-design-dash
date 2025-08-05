@@ -808,11 +808,11 @@ export class DatabaseStorage implements IStorage {
       );
 
     if (employeeId) {
-      query = query.where(eq(planningEntries.employee_id, employeeId)) as typeof query;
+      query = (query as any).where(eq(planningEntries.employee_id, employeeId));
     }
 
     if (departmentId) {
-      query = query.where(eq(employees.department_id, departmentId)) as typeof query;
+      query = (query as any).where(eq(employees.department_id, departmentId));
     }
 
     return await query.orderBy(asc(planningEntries.date), asc(planningEntries.start_time));
@@ -1223,7 +1223,7 @@ export class DatabaseStorage implements IStorage {
     });
 
     // Récupérer les temps réalisés pour comparaison
-    const timeEntries = await db
+    const actualTimeEntries = await db
       .select({
         id: timeEntries.id,
         date: timeEntries.date,
@@ -1249,7 +1249,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(validations.employee_id, employeeId),
-          eq(validations.week_start_date_date, weekStart)
+          eq(validations.week_start_date, weekStart)
         )
       );
 
@@ -1265,7 +1265,7 @@ export class DatabaseStorage implements IStorage {
       }
     });
 
-    timeEntries.forEach(entry => {
+    actualTimeEntries.forEach(entry => {
       actualHours += entry.actualHours || 0;
     });
 
@@ -1274,7 +1274,7 @@ export class DatabaseStorage implements IStorage {
       weekStart,
       weekEnd,
       planningEntries,
-      timeEntries,
+      timeEntries: actualTimeEntries,
       validation,
       summary: {
         plannedHours: Math.round(plannedHours * 100) / 100,
@@ -1349,7 +1349,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(validations.employee_id, employeeId),
-          eq(validations.week_start_date_date, weekStart)
+          eq(validations.week_start_date, weekStart)
         )
       );
     return validation || undefined;
@@ -1458,7 +1458,7 @@ export class DatabaseStorage implements IStorage {
         eq(notifications.is_read, false)
       ));
     
-    return result.rowCount || 0;
+    return (result.rowCount || 0);
   }
 
   async deleteNotification(id: number): Promise<boolean> {
@@ -1585,7 +1585,7 @@ export class DatabaseStorage implements IStorage {
     // Note: tasks table relationship needs to be implemented separately if needed
 
     if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+      query = (query as any).where(and(...conditions));
     }
 
     // Sorting
@@ -1594,7 +1594,7 @@ export class DatabaseStorage implements IStorage {
                        sortBy === 'created_at' ? timeEntries.created_at :
                        timeEntries.date;
     
-    query = query.orderBy(sortOrder === 'desc' ? desc(orderColumn) : asc(orderColumn));
+    query = (query as any).orderBy(sortOrder === 'desc' ? desc(orderColumn) : asc(orderColumn));
 
     // Pagination
     const data = await query.limit(limit).offset(offset);
@@ -1659,9 +1659,9 @@ export class DatabaseStorage implements IStorage {
 
     const entryWithCalculations = {
       ...entry,
-      total_hours: totalHours,
-      overtime_hours: overtimeHours,
-      is_overtime: overtimeHours > 0 || entry.is_overtime || false,
+      // total_hours: totalHours,     // Field not in schema
+      // overtime_hours: overtimeHours, // Field not in schema  
+      // is_overtime: overtimeHours > 0 || entry.is_overtime || false, // Field not in schema
       status: 'draft' as const,
     };
 
@@ -1696,9 +1696,9 @@ export class DatabaseStorage implements IStorage {
 
       updateData = {
         ...updateData,
-        total_hours: totalHours,
-        overtime_hours: overtimeHours,
-        is_overtime: overtimeHours > 0 || data.is_overtime || false,
+        // total_hours: totalHours,     // Field not in schema
+        // overtime_hours: overtimeHours, // Field not in schema  
+        // is_overtime: overtimeHours > 0 || data.is_overtime || false, // Field not in schema
       };
     }
 
@@ -1723,7 +1723,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .delete(timeEntries)
       .where(eq(timeEntries.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount || 0) > 0;
   }
 
   async bulkCreateTimeEntries(entries: InsertTimeEntry[]): Promise<TimeEntry[]> {
@@ -1740,9 +1740,9 @@ export class DatabaseStorage implements IStorage {
 
       return {
         ...entry,
-        total_hours: totalHours,
-        overtime_hours: overtimeHours,
-        is_overtime: overtimeHours > 0 || entry.is_overtime || false,
+        // total_hours: totalHours,     // Field not in schema
+        // overtime_hours: overtimeHours, // Field not in schema  
+        // is_overtime: overtimeHours > 0 || entry.is_overtime || false, // Field not in schema
         status: 'draft' as const,
       };
     });
@@ -1970,7 +1970,7 @@ export class DatabaseStorage implements IStorage {
 
     // French law: max 10h/day, 35h/week standard
     const maxDailyHours = 10;
-    const standardDailyHours = employee.weekly_hours / 5; // Assume 5-day work week
+    const standardDailyHours = (employee.weekly_hours || 35) / 5; // Assume 5-day work week
 
     let regularHours = Math.min(totalHours, standardDailyHours);
     let overtimeHours = Math.max(0, totalHours - standardDailyHours);
@@ -2045,8 +2045,8 @@ export class DatabaseStorage implements IStorage {
     employeeId: number, 
     date: string, 
     startTime: string
-  ): Promise<{ valid: boolean; errors: string[] }> {
-    const errors: string[] = [];
+  ): Promise<{ valid: boolean; conflicts: string[] }> {
+    const conflicts: string[] = [];
     const minRestHours = 11; // French labor law: 11h rest between shifts
 
     // Get previous day's last entry
@@ -2074,14 +2074,14 @@ export class DatabaseStorage implements IStorage {
         const restHours = (currentStartTime.getTime() - lastEndTime.getTime()) / (1000 * 60 * 60);
         
         if (restHours < minRestHours) {
-          errors.push(`Insufficient rest period: ${restHours.toFixed(1)}h < ${minRestHours}h required`);
+          conflicts.push(`Insufficient rest period: ${restHours.toFixed(1)}h < ${minRestHours}h required`);
         }
       }
     }
 
     return {
-      valid: errors.length === 0,
-      errors
+      valid: conflicts.length === 0,
+      conflicts
     };
   }
 
@@ -2218,23 +2218,23 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (conditions.length > 0) {
-      baseQuery = baseQuery.where(and(...conditions));
+      baseQuery = (baseQuery as any).where(and(...conditions));
     }
 
-    baseQuery = baseQuery.groupBy(projects.id, employees.first_name, employees.last_name);
+    baseQuery = (baseQuery as any).groupBy(projects.id, employees.first_name, employees.last_name);
 
     // Apply sorting
     const sortBy = filters.sortBy || 'created_at';
     const sortOrder = filters.sortOrder || 'desc';
     
     if (sortBy === 'name') {
-      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.name) : desc(projects.name));
+      baseQuery = (baseQuery as any).orderBy(sortOrder === 'asc' ? asc(projects.name) : desc(projects.name));
     } else if (sortBy === 'status') {
-      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.status) : desc(projects.status));
+      baseQuery = (baseQuery as any).orderBy(sortOrder === 'asc' ? asc(projects.status) : desc(projects.status));
     } else if (sortBy === 'client_name') {
-      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.client_name) : desc(projects.client_name));
+      baseQuery = (baseQuery as any).orderBy(sortOrder === 'asc' ? asc(projects.client_name) : desc(projects.client_name));
     } else {
-      baseQuery = baseQuery.orderBy(sortOrder === 'asc' ? asc(projects.created_at) : desc(projects.created_at));
+      baseQuery = (baseQuery as any).orderBy(sortOrder === 'asc' ? asc(projects.created_at) : desc(projects.created_at));
     }
 
     // Get total count
