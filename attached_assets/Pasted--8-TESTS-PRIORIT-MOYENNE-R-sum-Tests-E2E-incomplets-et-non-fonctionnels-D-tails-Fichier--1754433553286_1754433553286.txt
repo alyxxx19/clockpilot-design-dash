@@ -1,0 +1,121 @@
+#8 - [TESTS] - PRIORITÉ: MOYENNE
+Résumé: Tests E2E incomplets et non fonctionnels
+Détails:
+
+Fichier(s) concerné(s): /tests/e2e/, configuration Playwright
+Nature du problème: Tests définis mais sélecteurs incorrects, setup incomplet
+Impact: Impossible de valider les fonctionnalités automatiquement
+Contexte: Tests écrits pour une structure HTML différente
+
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+CONTEXTE: Les tests E2E utilisent des sélecteurs qui n'existent pas dans l'UI actuelle.
+MODIFIER /tests/e2e/auth.spec.ts pour corriger les sélecteurs :
+typescriptimport { test, expect } from '@playwright/test';
+
+test.describe('Authentication Flow', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+  });
+
+  test('should login with valid employee credentials', async ({ page }) => {
+    // Navigate to login page - Corriger le sélecteur
+    await page.getByRole('link', { name: /sign in/i }).click();
+    await expect(page).toHaveURL('/login');
+    
+    // Fill login form - Utiliser les bons sélecteurs
+    await page.getByLabel('Email').fill('employee@clockpilot.com');
+    await page.getByLabel('Password').fill('password123');
+    
+    // Submit form
+    await page.getByRole('button', { name: /sign in/i }).click();
+    
+    // Verify successful login
+    await expect(page).toHaveURL('/employee/dashboard');
+    await expect(page.getByRole('navigation')).toBeVisible();
+    await expect(page.getByText(/welcome/i)).toBeVisible();
+  });
+
+  test('should show error with invalid credentials', async ({ page }) => {
+    await page.getByRole('link', { name: /sign in/i }).click();
+    
+    await page.getByLabel('Email').fill('invalid@example.com');
+    await page.getByLabel('Password').fill('wrongpassword');
+    
+    await page.getByRole('button', { name: /sign in/i }).click();
+    
+    // Vérifier le message d'erreur
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.getByText(/invalid credentials/i)).toBeVisible();
+    
+    await expect(page).toHaveURL('/login');
+  });
+
+  test('should logout successfully', async ({ page }) => {
+    // Login first
+    await page.goto('/login');
+    await page.getByLabel('Email').fill('employee@clockpilot.com');
+    await page.getByLabel('Password').fill('password123');
+    await page.getByRole('button', { name: /sign in/i }).click();
+    
+    await expect(page).toHaveURL('/employee/dashboard');
+    
+    // Open user menu and logout
+    await page.getByRole('button', { name: /user menu/i }).click();
+    await page.getByRole('menuitem', { name: /log out/i }).click();
+    
+    await expect(page).toHaveURL('/');
+    await expect(page.getByRole('link', { name: /sign in/i })).toBeVisible();
+  });
+});
+CRÉER /playwright.config.ts pour la configuration :
+typescriptimport { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://localhost:3000',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'Mobile Chrome',
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'Mobile Safari',
+      use: { ...devices['iPhone 12'] },
+    },
+  ],
+
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI,
+  },
+});
+VALIDATION:
+
+npx playwright test doit passer
+Les tests doivent couvrir les flows principaux
+Les screenshots d'erreur doivent être générés
+"""

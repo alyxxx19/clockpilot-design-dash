@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { cacheService } from '../redis';
-import { logger } from '../security';
+import logger from '../logger';
 
 // Middleware de cache Redis
 export function cacheMiddleware(
