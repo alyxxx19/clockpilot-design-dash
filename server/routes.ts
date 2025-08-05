@@ -61,6 +61,7 @@ import {
 } from "./security";
 import { sql, and, or, eq } from "drizzle-orm";
 import { timeEntries } from "@shared/schema";
+import { env } from "../shared/env";
 
 // ============================================================================
 // INTERFACES
@@ -100,13 +101,13 @@ const generateTokens = (user: User) => {
 
   const accessToken = jwt.sign(
     { ...payload, type: 'access' },
-    process.env.JWT_SECRET!,
+    env.JWT_SECRET,
     { expiresIn: '7d' }
   );
 
   const refreshToken = jwt.sign(
     { ...payload, type: 'refresh' },
-    process.env.JWT_SECRET!,
+    env.JWT_REFRESH_SECRET,
     { expiresIn: '30d' }
   );
 
@@ -154,7 +155,7 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
     }
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
+    const decoded = jwt.verify(token, env.JWT_SECRET) as JWTPayload;
 
     if (decoded.type !== 'access') {
       return res.status(401).json({ 
@@ -268,7 +269,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.set('trust proxy', 1);
   
   // Apply security middleware in production
-  if (process.env.NODE_ENV === 'production') {
+  if (env.NODE_ENV === 'production') {
     app.use(securityMiddleware);
     app.use(compressionMiddleware);
     app.use(timeoutMiddleware());
@@ -480,7 +481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { refreshToken } = req.body;
 
       // Verify refresh token
-      const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET!) as JWTPayload;
+      const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as JWTPayload;
 
       if (decoded.type !== 'refresh') {
         return res.status(401).json({

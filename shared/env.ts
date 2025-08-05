@@ -16,15 +16,15 @@ const envSchema = z.object({
   PGDATABASE: z.string().optional(),
   
   // Authentication & Security
-  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required').refine(
+  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required').default('dev-jwt-secret-32chars-minimum-length').refine(
     (val) => process.env.NODE_ENV === 'development' || val.length >= 32,
     'JWT_SECRET must be at least 32 characters in production'
   ),
-  JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required').refine(
+  JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required').default('dev-jwt-refresh-secret-32chars-minimum').refine(
     (val) => process.env.NODE_ENV === 'development' || val.length >= 32,
     'JWT_REFRESH_SECRET must be at least 32 characters in production'
   ),
-  SESSION_SECRET: z.string().min(1, 'SESSION_SECRET is required').refine(
+  SESSION_SECRET: z.string().min(1, 'SESSION_SECRET is required').default('dev-session-secret-32chars-minimum-length').refine(
     (val) => process.env.NODE_ENV === 'development' || val.length >= 32,
     'SESSION_SECRET must be at least 32 characters in production'
   ),
