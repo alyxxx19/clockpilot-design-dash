@@ -14,10 +14,15 @@ DB_NAME="clockpilot"
 DB_USER="clockpilot_user"
 ENVIRONMENT="${ENVIRONMENT:-development}"
 
-# Default password hash for development (password: "password123")
-# Override with SEED_PASSWORD_HASH environment variable for custom password
-DEFAULT_PASSWORD_HASH='$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LeJvnE4Gd4TaUdoze'
-PASSWORD_HASH="${SEED_PASSWORD_HASH:-$DEFAULT_PASSWORD_HASH}"
+# Password hash for seeded users - MUST be provided via SEED_PASSWORD_HASH environment variable
+# For security, no default password is provided
+if [ -z "$SEED_PASSWORD_HASH" ]; then
+    error "SEED_PASSWORD_HASH environment variable is required for security"
+    error "Generate a bcrypt hash for your desired password and set it as SEED_PASSWORD_HASH"
+    error "Example: export SEED_PASSWORD_HASH='\$2a\$12\$YOUR_SECURE_HASH_HERE'"
+    exit 1
+fi
+PASSWORD_HASH="$SEED_PASSWORD_HASH"
 
 # Couleurs
 RED='\033[0;31m'
@@ -119,7 +124,7 @@ INSERT INTO departments (name, description, created_at, updated_at) VALUES
 ('Support', 'Support client et technique', NOW(), NOW()),
 ('Comptabilité', 'Service comptabilité et finance', NOW(), NOW());
 
--- Insérer les utilisateurs (mots de passe hashés avec bcrypt pour "password123")
+-- Insérer les utilisateurs (mots de passe hashés avec bcrypt)
 INSERT INTO users (email, password_hash, first_name, last_name, role, created_at, updated_at) VALUES
 ('admin@clockpilot.com', '$PASSWORD_HASH', 'Admin', 'System', 'admin', NOW(), NOW()),
 ('manager.rh@clockpilot.com', '$PASSWORD_HASH', 'Marie', 'Dubois', 'manager', NOW(), NOW()),
@@ -349,11 +354,11 @@ ORDER BY type;
 \echo '=================================='
 \echo 'COMPTES DE TEST DISPONIBLES'
 \echo '=================================='
-\echo 'Email: admin@clockpilot.com | Mot de passe: password123 | Rôle: Admin'
-\echo 'Email: manager.rh@clockpilot.com | Mot de passe: password123 | Rôle: Manager RH'
-\echo 'Email: manager.dev@clockpilot.com | Mot de passe: password123 | Rôle: Manager Dev'
-\echo 'Email: employee.dev1@clockpilot.com | Mot de passe: password123 | Rôle: Employé Dev'
-\echo 'Email: employee.support@clockpilot.com | Mot de passe: password123 | Rôle: Support'
+\echo 'Email: admin@clockpilot.com | Mot de passe: [via SEED_PASSWORD_HASH] | Rôle: Admin'
+\echo 'Email: manager.rh@clockpilot.com | Mot de passe: [via SEED_PASSWORD_HASH] | Rôle: Manager RH'
+\echo 'Email: manager.dev@clockpilot.com | Mot de passe: [via SEED_PASSWORD_HASH] | Rôle: Manager Dev'
+\echo 'Email: employee.dev1@clockpilot.com | Mot de passe: [via SEED_PASSWORD_HASH] | Rôle: Employé Dev'
+\echo 'Email: employee.support@clockpilot.com | Mot de passe: [via SEED_PASSWORD_HASH] | Rôle: Support'
 \echo '=================================='
 EOF
 }
@@ -376,9 +381,14 @@ Options:
 
 Variables d'environnement:
     ENVIRONMENT         Environnement (development, staging) [défaut: development]
+    SEED_PASSWORD_HASH  Hash bcrypt pour les mots de passe des comptes de test (REQUIS)
 
 Exemples:
-    # Peuplement complet
+    # Générer un hash bcrypt pour votre mot de passe
+    htpasswd -bnBC 12 "" yourpassword | tr -d ':\n'
+    
+    # Peuplement complet avec mot de passe sécurisé
+    export SEED_PASSWORD_HASH='$2a$12$YOUR_GENERATED_HASH_HERE'
     $0 seed
 
     # Nettoyage de la base

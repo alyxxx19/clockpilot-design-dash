@@ -2,49 +2,73 @@
 
 ## Security Notice
 
-The seed script has been updated to use environment variables for password hashes to improve security.
+This directory contains database seeding scripts for development environments. These scripts have been updated to follow security best practices.
 
-## Usage
+## seed-db.sh
 
-### Default Development Setup
-```bash
-# Uses default password "password123" for all test accounts
-./scripts/seed-db.sh
-```
+A secure database seeding script that creates test data for ClockPilot development environments.
 
-### Custom Password Setup
-```bash
-# Use custom password hash (generate with bcrypt)
-export SEED_PASSWORD_HASH='$2a$12$your_custom_hash_here'
-./scripts/seed-db.sh
-```
+### Security Features
 
-### Generate Custom Password Hash
-```bash
-# Using Node.js bcrypt (recommended)
-node -e "const bcrypt = require('bcrypt'); console.log(bcrypt.hashSync('your_password', 12));"
+- **No hardcoded passwords**: Requires `SEED_PASSWORD_HASH` environment variable
+- **Environment protection**: Refuses to run in production environments
+- **Secure by default**: Fails safely if security requirements aren't met
 
-# Using Python bcrypt
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'your_password', bcrypt.gensalt(rounds=12)).decode())"
-```
+### Usage
+
+1. **Generate a secure password hash:**
+   ```bash
+   # Using htpasswd (recommended)
+   htpasswd -bnBC 12 "" yourpassword | tr -d ':\n'
+   
+   # Using Node.js bcrypt (alternative)
+   node -e "console.log(require('bcrypt').hashSync('yourpassword', 12))"
+   ```
+
+2. **Set the environment variable:**
+   ```bash
+   export SEED_PASSWORD_HASH='$2a$12$YOUR_GENERATED_HASH_HERE'
+   ```
+
+3. **Run the seeding script:**
+   ```bash
+   ./scripts/seed-db.sh seed
+   ```
+
+### Available Commands
+
+- `seed` - Populate database with test data (default)
+- `clean` - Clean all existing data
+- `summary` - Show current data summary
+- `help` - Show usage information
+
+### Environment Variables
+
+- `ENVIRONMENT` - Environment (development, staging) [default: development]
+- `SEED_PASSWORD_HASH` - Bcrypt hash for test account passwords (REQUIRED)
+
+### Test Accounts Created
+
+After running with your secure password hash, the following test accounts will be available:
+
+- `admin@clockpilot.com` - Admin role
+- `manager.rh@clockpilot.com` - HR Manager
+- `manager.dev@clockpilot.com` - Development Manager  
+- `employee.dev1@clockpilot.com` - Developer
+- `employee.support@clockpilot.com` - Support
+
+All accounts use the password corresponding to your `SEED_PASSWORD_HASH`.
 
 ## Security Best Practices
 
-1. **Never use default passwords in production**
-2. **Always set custom SEED_PASSWORD_HASH for any deployed environment**
-3. **The script automatically prevents execution in production environment**
-4. **Change all default passwords immediately after seeding**
+1. **Never commit password hashes to version control**
+2. **Use strong, unique passwords for each environment**
+3. **Rotate passwords regularly**
+4. **Limit access to seeding scripts in production-like environments**
+5. **Use different passwords for different environments**
 
-## Test Accounts Created
+## Recent Security Updates
 
-| Email | Role | Default Password |
-|-------|------|------------------|
-| admin@clockpilot.com | admin | password123 |
-| manager.rh@clockpilot.com | manager | password123 |
-| manager.dev@clockpilot.com | manager | password123 |
-| employee.dev1@clockpilot.com | employee | password123 |
-| employee.dev2@clockpilot.com | employee | password123 |
-| employee.marketing@clockpilot.com | employee | password123 |
-| employee.support@clockpilot.com | employee | password123 |
-
-**Important**: Change these passwords immediately in any non-development environment.
+- **2024-08**: Removed hardcoded bcrypt hash vulnerability
+- **2024-08**: Added required environment variable for password security
+- **2024-08**: Updated documentation to reflect security requirements
