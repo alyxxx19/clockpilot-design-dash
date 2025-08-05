@@ -1,0 +1,301 @@
+#7 - [PERFORMANCE] - PRIORITÉ: HAUTE
+Résumé: Absence totale de cache et optimisation des requêtes
+Détails:
+
+Fichier(s) concerné(s): /server/middleware/cache.ts, requêtes DB partout
+Nature du problème: Pas de cache Redis, requêtes N+1, pas de pagination
+Impact: Temps de réponse lents, charge serveur élevée
+Contexte: Middleware de cache défini mais non utilisé
+
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+CONTEXTE: Le système n'a pas de cache fonctionnel malgré un middleware défini.
+CRÉER /server/services/cache.service.ts :
+typescriptimport Redis from 'ioredis';
+import { env } from '@/shared/env-validation';
+
+class CacheService {
+  private redis: Redis | null = null;
+  private isConnected = false;
+
+  constructor() {
+    if (env.REDIS_URL) {
+      this.redis = new Redis(env.REDIS_URL);
+      
+      this.redis.on('connect', () => {
+        console.log('✅ Redis connected');
+        this.isConnected = true;
+      });
+      
+      this.redis.on('error', (err) => {
+        console.error('❌ Redis error:', err);
+        this.isConnected = false;
+      });
+    }
+  }
+
+  async get<T>(key: string): Promise<T | null> {
+    if (!this.redis || !this.isConnected) return null;
+    
+    try {
+      const data = await this.redis.get(key);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.error('Cache get error:', error);
+      return null;
+    }
+  }
+
+  async set(key: string, value: any, ttl = 300): Promise<void> {
+    if (!this.redis || !this.isConnected) return;
+    
+    try {
+      await this.redis.setex(key, ttl, JSON.stringify(value));
+    } catch (error) {
+      console.error('Cache set error:', error);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    if (!this.redis || !this.isConnected) return;
+    
+    try {
+      await this.redis.del(key);
+    } catch (error) {
+      console.error('Cache delete error:', error);
+    }
+  }
+
+  async invalidatePattern(pattern: string): Promise<void> {
+    if (!this.redis || !this.isConnected) return;
+    
+    try {
+      const keys = await this.redis.keys(pattern);
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } catch (error) {
+      console.error('Cache invalidate pattern error:', error);
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (!this.redis || !this.isConnected) return;
+    
+    try {
+      await this.redis.flushdb();
+    } catch (error) {
+      console.error('Cache flush error:', error);
+    }
+  }
+
+  generateKey(...parts: (string | number)[]): string {
+    return parts.join(':');
+  }
+}
+
+export const cacheService = new CacheService();
+
+// Cache decorator for methods
+export function Cacheable(ttl = 300) {
+  return function (target: any, propertyName: string, descriptor: PropertyDescriptor) {
+    const originalMethod = descriptor.value;
+
+    descriptor.value = async function (...args: any[]) {
+      const cacheKey = cacheService.generateKey(target.constructor.name, propertyName, ...args);
+      
+      // Try to get from cache
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        console.log(`Cache hit: ${cacheKey}`);
+        return cached;
+      }
+      
+      // Execute original method
+      const result = await originalMethod.apply(this, args);
+      
+      // Store in cache
+      await cacheService.set(cacheKey, result, ttl);
+      console.log(`Cache miss: ${cacheKey}`);
+      
+      return result;
+    };
+
+    return descriptor;
+  };
+}
+
+// Cache invalidation decorator
+export function InvalidateCache(patterns: string[]) {
+  return function (target: any, propertyName: string, descriptor: PropertyDescriptor) {
+    const originalMethod = descriptor.value;
+
+    descriptor.value = async function (...args: any[]) {
+      const result = await originalMethod.apply(this, args);
+      
+      // Invalidate cache patterns
+      for (const pattern of patterns) {
+        await cacheService.invalidatePattern(pattern);
+      }
+      
+      return result;
+    };
+
+    return descriptor;
+  };
+}
+INTÉGRATION dans les services de données :
+CRÉER /server/services/employee.service.ts :
+typescriptimport { db } from '@/server/db';
+import { employees, users, departments } from '@/server/db/schema';
+import { eq, like, and, or, desc, asc, sql } from 'drizzle-orm';
+import { Cacheable, InvalidateCache, cacheService } from './cache.service';
+
+export class EmployeeService {
+  @Cacheable(600) // Cache for 10 minutes
+  async getEmployeeById(id: number) {
+    const result = await db
+      .select({
+        employee: employees,
+        user: users,
+        department: departments,
+      })
+      .from(employees)
+      .leftJoin(users, eq(employees.userId, users.id))
+      .leftJoin(departments, eq(employees.departmentId, departments.id))
+      .where(eq(employees.id, id))
+      .limit(1);
+    
+    return result[0] || null;
+  }
+
+  @Cacheable(300) // Cache for 5 minutes
+  async getEmployeesList(params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    departmentId?: number;
+    isActive?: boolean;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }) {
+    const page = params.page || 1;
+    const limit = params.limit || 20;
+    const offset = (page - 1) * limit;
+    
+    // Build where conditions
+    const conditions = [];
+    if (params.search) {
+      conditions.push(
+        or(
+          like(employees.firstName, `%${params.search}%`),
+          like(employees.lastName, `%${params.search}%`),
+          like(employees.email, `%${params.search}%`)
+        )
+      );
+    }
+    if (params.departmentId) {
+      conditions.push(eq(employees.departmentId, params.departmentId));
+    }
+    if (params.isActive !== undefined) {
+      conditions.push(eq(employees.isActive, params.isActive));
+    }
+
+    // Build order by
+    const orderColumn = params.sortBy || 'createdAt';
+    const orderDirection = params.sortOrder === 'asc' ? asc : desc;
+    
+    // Execute query with pagination
+    const [data, countResult] = await Promise.all([
+      db
+        .select({
+          employee: employees,
+          user: {
+            id: users.id,
+            email: users.email,
+            role: users.role,
+          },
+          department: {
+            id: departments.id,
+            name: departments.name,
+          },
+        })
+        .from(employees)
+        .leftJoin(users, eq(employees.userId, users.id))
+        .leftJoin(departments, eq(employees.departmentId, departments.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(orderDirection(employees[orderColumn]))
+        .limit(limit)
+        .offset(offset),
+      
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(employees)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+    ]);
+
+    const total = Number(countResult[0].count);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    };
+  }
+
+  @InvalidateCache(['employees:*'])
+  async createEmployee(data: any) {
+    const [newEmployee] = await db
+      .insert(employees)
+      .values(data)
+      .returning();
+    
+    return newEmployee;
+  }
+
+  @InvalidateCache(['employees:*'])
+  async updateEmployee(id: number, data: any) {
+    const [updated] = await db
+      .update(employees)
+      .set(data)
+      .where(eq(employees.id, id))
+      .returning();
+    
+    // Invalidate specific employee cache
+    await cacheService.delete(`EmployeeService:getEmployeeById:${id}`);
+    
+    return updated;
+  }
+
+  @Cacheable(3600) // Cache for 1 hour
+  async getEmployeeStatistics() {
+    const stats = await db
+      .select({
+        totalEmployees: sql<number>`count(*)`,
+        activeEmployees: sql<number>`count(*) filter (where ${employees.isActive} = true)`,
+        avgWorkingHours: sql<number>`avg(${employees.workingHours})`,
+        departmentCount: sql<number>`count(distinct ${employees.departmentId})`,
+      })
+      .from(employees);
+    
+    return stats[0];
+  }
+}
+
+export const employeeService = new EmployeeService();
+AJOUT dans .env.example :
+# Cache
+REDIS_URL=redis://localhost:6379
+VALIDATION:
+
+Les requêtes répétées doivent être servies depuis le cache
+Les temps de réponse doivent diminuer significativement
+L'invalidation du cache doit fonctionner lors des updates
+"""
