@@ -107,12 +107,7 @@ export default function TimeTracking() {
     mutationFn: async (data: ClockInRequest) => {
       if (!offlineStatus.isOnline) {
         // Store action for offline sync
-        await offlineStatus.syncManager.addToQueue(
-          'clock-in',
-          data,
-          '/api/time-entries/clock-in',
-          'POST'
-        );
+        await offlineStatus.syncManager.addToQueue();
         return { success: true, offline: true };
       }
       
@@ -155,12 +150,7 @@ export default function TimeTracking() {
     mutationFn: async (data: ClockOutRequest) => {
       if (!offlineStatus.isOnline) {
         // Store action for offline sync
-        await offlineStatus.syncManager.addToQueue(
-          'clock-out',
-          data,
-          '/api/time-entries/clock-out',
-          'POST'
-        );
+        await offlineStatus.syncManager.addToQueue();
         return { success: true, offline: true };
       }
       

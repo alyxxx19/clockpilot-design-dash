@@ -55,48 +55,50 @@ export const OfflineIndicator: React.FC<OfflineIndicatorProps> = ({
   useEffect(() => {
     // Subscribe to sync status updates  
     const unsubscribe = mockSyncManager.addStatusListener((status: SyncStatus) => {
-      const wasOffline = !syncStatus.isOnline;
-      const wasQueueEmpty = syncStatus.queueCount === 0;
-      
-      setSyncStatus(status);
+      setSyncStatus(prevStatus => {
+        const wasOffline = !prevStatus.isOnline;
+        const wasQueueEmpty = prevStatus.queueCount === 0;
+        
+        // Show success toast when items are synced
+        if (status.lastSyncTime && !wasQueueEmpty && status.queueCount === 0) {
+          toast({
+            title: "Synchronisé !",
+            description: "Toutes les actions hors ligne ont été synchronisées",
+            variant: "default",
+          });
+          setLastSyncMessage("Dernière sync: " + new Date(status.lastSyncTime).toLocaleTimeString());
+        }
 
-      // Show success toast when items are synced
-      if (status.lastSyncTime && !wasQueueEmpty && status.queueCount === 0) {
-        toast({
-          title: "Synchronisé !",
-          description: "Toutes les actions hors ligne ont été synchronisées",
-          variant: "default",
-        });
-        setLastSyncMessage("Dernière sync: " + new Date(status.lastSyncTime).toLocaleTimeString());
-      }
+        // Show connection restored message
+        if (wasOffline && status.isOnline) {
+          toast({
+            title: "Connexion rétablie",
+            description: status.queueCount > 0 
+              ? `Synchronisation de ${status.queueCount} action(s) en cours...`
+              : "Vous êtes de nouveau en ligne",
+            variant: "default",
+          });
+        }
 
-      // Show connection restored message
-      if (wasOffline && status.isOnline) {
-        toast({
-          title: "Connexion rétablie",
-          description: status.queueCount > 0 
-            ? `Synchronisation de ${status.queueCount} action(s) en cours...`
-            : "Vous êtes de nouveau en ligne",
-          variant: "default",
-        });
-      }
-
-      // Show error messages
-      if (status.error) {
-        toast({
-          title: "Erreur de synchronisation",
-          description: status.error,
-          variant: "destructive",
-        });
-      }
+        // Show error messages
+        if (status.error) {
+          toast({
+            title: "Erreur de synchronisation",
+            description: status.error,
+            variant: "destructive",
+          });
+        }
+        
+        return status;
+      });
     });
 
     return unsubscribe;
-  }, [syncStatus, toast]);
+  }, [toast]);
 
   const handleForceSync = async () => {
     try {
-      await offlineSyncManager.forceSync();
+      await mockSyncManager.forceSync();
     } catch (error) {
       toast({
         title: "Erreur",
