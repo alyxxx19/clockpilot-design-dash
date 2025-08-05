@@ -3,7 +3,7 @@
  * Utilise gifsicle pour l'optimisation
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -20,21 +20,33 @@ async function createGif(inputPattern, outputPath, options = {}) {
   } = options;
   
   return new Promise((resolve, reject) => {
-    let command = `convert ${inputPattern} -delay ${delay} -loop 0`;
+    // Build arguments array for convert command
+    const convertArgs = [inputPattern, '-delay', delay.toString(), '-loop', '0'];
     
     if (width) {
-      command += ` -resize ${width}x`;
+      convertArgs.push('-resize', `${width}x`);
     }
     
-    command += ` "${outputPath}"`;
+    convertArgs.push(outputPath);
     
-    if (optimize) {
-      command += ` && gifsicle --optimize=3 --colors=${colors} "${outputPath}" -o "${outputPath}"`;
-    }
-    
-    exec(command, (error, stdout, stderr) => {
+    execFile('convert', convertArgs, (error, stdout, stderr) => {
       if (error) {
         reject(error);
+        return;
+      }
+      
+      if (optimize) {
+        // Run gifsicle optimization as a separate command
+        const gifsicleArgs = ['--optimize=3', `--colors=${colors}`, outputPath, '-o', outputPath];
+        execFile('gifsicle', gifsicleArgs, (optimizeError, optimizeStdout, optimizeStderr) => {
+          if (optimizeError) {
+            // If optimization fails, still resolve with the unoptimized GIF
+            console.warn('GIF optimization failed, using unoptimized version:', optimizeError.message);
+            resolve(outputPath);
+          } else {
+            resolve(outputPath);
+          }
+        });
       } else {
         resolve(outputPath);
       }
@@ -121,9 +133,16 @@ async function createWorkflowGifs() {
 async function createSimpleGif(outputPath, description) {
   // Créer un GIF simple avec des frames de couleur unie
   return new Promise((resolve, reject) => {
-    const command = `convert -size 400x300 xc:lightblue xc:lightgreen xc:lightblue -delay 100 -loop 0 "${outputPath}"`;
+    // Use execFile for better security - avoids shell injection risks
+    const args = [
+      '-size', '400x300',
+      'xc:lightblue', 'xc:lightgreen', 'xc:lightblue',
+      '-delay', '100',
+      '-loop', '0',
+      outputPath
+    ];
     
-    exec(command, (error, stdout, stderr) => {
+    execFile('convert', args, (error, stdout, stderr) => {
       if (error) {
         reject(error);
       } else {
