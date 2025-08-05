@@ -1,0 +1,292 @@
+#5 - [TYPES] - PRIORITÉ: CRITIQUE
+Résumé: Configuration TypeScript conflictuelle et types manquants
+Détails:
+
+Fichier(s) concerné(s): /tsconfig.json (multiple), types manquants partout
+Nature du problème: Deux tsconfig.json, paths incorrects, types non définis
+Impact: Erreurs de compilation TypeScript, IntelliSense cassé
+Contexte: Configuration pour Next.js et Vite simultanément
+
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+CONTEXTE: Le projet a deux tsconfig.json conflictuels et des types manquants.
+
+REMPLACER /tsconfig.json par une version unifiée pour Next.js :
+
+json{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./app/*", "./client/src/*"],
+      "@/components/*": ["./components/*"],
+      "@/lib/*": ["./lib/*"],
+      "@/server/*": ["./server/*"],
+      "@/shared/*": ["./shared/*"],
+      "@/types/*": ["./types/*"]
+    },
+    "baseUrl": "."
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "dist",
+    "build"
+  ]
+}
+
+CRÉER /types/global.d.ts pour les types globaux :
+
+typescript// Global type definitions
+
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      NODE_ENV: 'development' | 'production' | 'test';
+      DATABASE_URL: string;
+      JWT_SECRET: string;
+      JWT_REFRESH_SECRET: string;
+      SESSION_SECRET: string;
+      NEXT_PUBLIC_API_URL: string;
+      NEXT_PUBLIC_APP_URL: string;
+    }
+  }
+}
+
+// User and Auth Types
+export interface User {
+  id: number;
+  email: string;
+  username: string;
+  role: 'admin' | 'employee';
+  employee?: Employee;
+}
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface AuthRequest extends Request {
+  user?: User;
+}
+
+// Employee Types
+export interface Employee {
+  id: number;
+  userId: number;
+  employeeCode?: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  position?: string;
+  departmentId?: number;
+  department?: Department;
+  managerId?: number;
+  manager?: Employee;
+  hireDate?: Date;
+  contractType?: string;
+  workingHours: number;
+  hourlyRate?: number;
+  isActive: boolean;
+  metadata?: Record<string, any>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Department Types
+export interface Department {
+  id: number;
+  name: string;
+  code?: string;
+  description?: string;
+  managerId?: number;
+  manager?: Employee;
+  parentId?: number;
+  parent?: Department;
+  children?: Department[];
+  isActive: boolean;
+}
+
+// Planning Types
+export interface Planning {
+  id: number;
+  employeeId: number;
+  employee?: Employee;
+  date: Date;
+  startTime: Date;
+  endTime: Date;
+  breakDuration: number;
+  status: 'draft' | 'published' | 'validated' | 'rejected';
+  shiftType?: string;
+  locationId?: number;
+  notes?: string;
+  validatedBy?: number;
+  validatedAt?: Date;
+}
+
+// Time Entry Types
+export interface TimeEntry {
+  id: number;
+  employeeId: number;
+  employee?: Employee;
+  planningId?: number;
+  planning?: Planning;
+  date: Date;
+  checkIn: Date;
+  checkOut?: Date;
+  breakDuration: number;
+  totalHours?: number;
+  overtimeHours: number;
+  status: 'pending' | 'validated' | 'rejected';
+  entryType: 'manual' | 'auto' | 'clock';
+  locationLat?: number;
+  locationLng?: number;
+  notes?: string;
+  validatedBy?: number;
+  validatedAt?: Date;
+  anomalies?: Anomaly[];
+}
+
+export interface Anomaly {
+  type: 'missing_break' | 'excessive_hours' | 'outside_planning' | 'weekend_work' | 'night_work';
+  severity: 'low' | 'medium' | 'high';
+  message: string;
+  details?: Record<string, any>;
+}
+
+// Project Types
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  status: 'active' | 'on_hold' | 'completed' | 'cancelled';
+  startDate?: Date;
+  endDate?: Date;
+  budget?: number;
+  spent: number;
+  progress: number;
+  clientId?: number;
+  managerId?: number;
+  manager?: Employee;
+  departmentId?: number;
+  department?: Department;
+  repositoryUrl?: string;
+  documentationUrl?: string;
+  metadata?: Record<string, any>;
+  members?: ProjectMember[];
+}
+
+export interface ProjectMember {
+  id: number;
+  projectId: string;
+  project?: Project;
+  employeeId: number;
+  employee?: Employee;
+  role: 'owner' | 'manager' | 'developer' | 'designer' | 'member';
+  allocation: number;
+  startDate?: Date;
+  endDate?: Date;
+}
+
+// Task Types
+export interface Task {
+  id: number;
+  projectId?: string;
+  project?: Project;
+  title: string;
+  description?: string;
+  assigneeId?: number;
+  assignee?: Employee;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
+  dueDate?: Date;
+  estimatedHours?: number;
+  actualHours?: number;
+  completedAt?: Date;
+  createdBy: number;
+  creator?: User;
+}
+
+// Notification Types
+export interface Notification {
+  id: number;
+  userId: number;
+  user?: User;
+  type: 'info' | 'warning' | 'error' | 'success' | 'planning' | 'validation' | 'task';
+  title: string;
+  message?: string;
+  data?: Record<string, any>;
+  isRead: boolean;
+  readAt?: Date;
+  createdAt: Date;
+}
+
+// API Response Types
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+  pagination?: PaginationInfo;
+}
+
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+export interface FilterParams {
+  search?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  departmentId?: number;
+  employeeId?: number;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export {};
+
+SUPPRIMER l'ancienne configuration :
+
+
+Supprimer le second tsconfig.json s'il existe
+Mettre à jour tous les imports pour utiliser les nouveaux paths
+
+VALIDATION:
+
+npx tsc --noEmit doit passer sans erreur
+IntelliSense doit fonctionner dans VS Code
+Les imports avec @ doivent se résoudre correctement
+"""
