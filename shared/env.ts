@@ -16,9 +16,18 @@ const envSchema = z.object({
   PGDATABASE: z.string().optional(),
   
   // Authentication & Security
-  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
-  SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters'),
+  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required').refine(
+    (val) => process.env.NODE_ENV === 'development' || val.length >= 32,
+    'JWT_SECRET must be at least 32 characters in production'
+  ),
+  JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required').refine(
+    (val) => process.env.NODE_ENV === 'development' || val.length >= 32,
+    'JWT_REFRESH_SECRET must be at least 32 characters in production'
+  ),
+  SESSION_SECRET: z.string().min(1, 'SESSION_SECRET is required').refine(
+    (val) => process.env.NODE_ENV === 'development' || val.length >= 32,
+    'SESSION_SECRET must be at least 32 characters in production'
+  ),
   
   // Database Seeding (Development Only)
   SEED_PASSWORD_HASH: z.string().optional(),
