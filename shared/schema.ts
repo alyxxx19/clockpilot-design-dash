@@ -58,11 +58,13 @@ export const employees = pgTable("employees", {
     enum: ['CDI', 'CDD', 'STAGE', 'FREELANCE', 'INTERIM'] 
   }).notNull().default('CDI'),
   hourly_rate: decimal("hourly_rate", { precision: 10, scale: 2 }),
+  weekly_hours: decimal("weekly_hours", { precision: 5, scale: 2 }).default('35'),
   vacation_days_total: integer("vacation_days_total").notNull().default(25),
   vacation_days_used: integer("vacation_days_used").notNull().default(0),
   is_active: boolean("is_active").notNull().default(true),
   phone: text("phone"),
   address: text("address"),
+  avatar_url: text("avatar_url"),
   created_at: timestamp("created_at").defaultNow().notNull(),
   updated_at: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -158,6 +160,7 @@ export const timeEntries = pgTable("time_entries", {
   }).notNull().default('work'),
   category: text("category"), // Custom categories
   description: text("description"),
+  break_duration: integer("break_duration").default(0), // Break duration in minutes
   status: text("status", { 
     enum: ['draft', 'submitted', 'validated', 'rejected'] 
   }).notNull().default('draft'),
@@ -281,6 +284,7 @@ export const notifications = pgTable("notifications", {
   message: text("message").notNull(),
   action_url: text("action_url"),
   data: json("data"), // Additional contextual data
+  metadata: json("metadata"), // Additional metadata for complex notifications
   is_read: boolean("is_read").default(false).notNull(),
   read_at: timestamp("read_at"),
   created_at: timestamp("created_at").defaultNow().notNull(),

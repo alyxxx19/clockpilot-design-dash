@@ -106,6 +106,7 @@ export interface IStorage {
   // Planning conflicts and validation logic
   detectPlanningConflicts(employeeId?: number, startDate?: string, endDate?: string): Promise<any[]>;
   validateDailyHours(employeeId: number, date: string, startTime: string, endTime: string): Promise<{ valid: boolean; hours: number; conflicts: string[] }>;
+  validateDailyHours(employeeId: number, date: string, totalHours: number): Promise<{ valid: boolean; errors: string[] }>;
   validateWeeklyHours(employeeId: number, weekStart: string): Promise<{ valid: boolean; totalHours: number; conflicts: string[] }>;
   validateRestPeriod(employeeId: number, date: string, startTime: string): Promise<{ valid: boolean; conflicts: string[] }>;
   
@@ -135,14 +136,17 @@ export interface IStorage {
   bulkCreateTimeEntries(entries: InsertTimeEntry[]): Promise<TimeEntry[]>;
   bulkUpdateTimeEntries(entries: { id: number; data: Partial<InsertTimeEntry> }[]): Promise<TimeEntry[]>;
   
+  // Additional time entry methods
+  compareTimeWithPlanning(employeeId: number, date: string): Promise<any>;
+  getTimeEntriesSummary(employeeId: number, startDate: string, endDate: string): Promise<any>;
+  submitWeeklyTimeEntries(employeeId: number, weekStart: string): Promise<{ submitted: number; errors: string[] }>;
+  
   // Time entry validation and business logic
   validateTimeEntryOverlap(employeeId: number, date: string, startTime: string, endTime: string, excludeId?: number): Promise<{ valid: boolean; conflicts: string[] }>;
   calculateWorkingHours(startTime: string, endTime: string, breakDuration: number): number;
   calculateOvertimeHours(employeeId: number, date: string, totalHours: number): Promise<{ regularHours: number; overtimeHours: number }>;
-  submitWeeklyTimeEntries(employeeId: number, weekStart: string): Promise<{ submitted: number; errors: string[] }>;
   
   // French labor law validation methods
-  validateDailyHours(employeeId: number, date: string, totalHours: number): Promise<{ valid: boolean; errors: string[] }>;
   validateWeeklyHours(employeeId: number, weekStart: string, totalHours: number): Promise<{ valid: boolean; errors: string[] }>;
   validateRestPeriod(employeeId: number, date: string, startTime: string): Promise<{ valid: boolean; errors: string[] }>;
   
@@ -996,10 +1000,10 @@ export class DatabaseStorage implements IStorage {
 
 
   // ========================================
-  // PLANNING OPERATIONS
+  // PLANNING OPERATIONS (ADVANCED)
   // ========================================
   
-  async getPlanningEntries(filters: {
+  async getPlanningEntriesAdvanced(filters: {
     startDate?: string;
     endDate?: string;
     employeeId?: number;

@@ -1195,18 +1195,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const targetEndTime = updateData.end_time || existingEntry.endTime;
 
         if (targetStartTime && targetEndTime) {
+          const workingHours = storage.calculateWorkingHours(targetStartTime, targetEndTime, 0);
           const validation = await storage.validateDailyHours(
             existingEntry.employeeId,
             targetDate,
-            targetStartTime,
-            targetEndTime
+            workingHours
           );
 
           if (!validation.valid) {
             return res.status(409).json({
               error: 'Planning conflicts detected',
               code: 'PLANNING_CONFLICTS',
-              conflicts: validation.conflicts,
+              errors: validation.errors,
             });
           }
 
@@ -1221,7 +1221,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return res.status(409).json({
               error: 'Rest period violation',
               code: 'REST_PERIOD_VIOLATION',
-              conflicts: restValidation.conflicts,
+              errors: restValidation.errors,
             });
           }
         }
@@ -1270,18 +1270,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate all entries for conflicts
       const validationResults = [];
       for (const entry of entries) {
-        const validation = await storage.validateDailyHours(
-          entry.employee_id,
-          entry.date,
-          entry.start_time,
-          entry.end_time
-        );
-        
-        if (!validation.valid) {
-          validationResults.push({
-            entry,
-            conflicts: validation.conflicts,
-          });
+        if (entry.start_time && entry.end_time) {
+          const workingHours = storage.calculateWorkingHours(entry.start_time, entry.end_time, 0);
+          const validation = await storage.validateDailyHours(
+            entry.employee_id,
+            entry.date,
+            workingHours
+          );
+          
+          if (!validation.valid) {
+            validationResults.push({
+              entry,
+              errors: validation.errors,
+            });
+          }
         }
       }
 
@@ -1289,7 +1291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({
           error: 'Multiple planning conflicts detected',
           code: 'BULK_PLANNING_CONFLICTS',
-          conflicts: validationResults,
+          errors: validationResults,
         });
       }
 
@@ -1311,7 +1313,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             notes: e.notes,
           }))
         );
-        results.created = createdEntries;
+        results.created = createdEntries as any;
       }
 
       if (updateEntries.length > 0) {
@@ -1327,7 +1329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
           }))
         );
-        results.updated = updatedEntries;
+        results.updated = updatedEntries as any;
       }
 
       res.status(201).json({
