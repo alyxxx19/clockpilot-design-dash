@@ -1,0 +1,279 @@
+#4 - [ROUTING] - PRIORITÉ: CRITIQUE
+Résumé: Routes API Express en conflit avec Next.js App Router
+Détails:
+
+Fichier(s) concerné(s): /server/routes.ts, /app/api/ (manquant)
+Nature du problème: Routes API définies dans Express au lieu de Next.js
+Impact: Routes API non accessibles, CORS issues, authentication bypass
+Contexte: Mélange de paradigmes Express et Next.js
+
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+CONTEXTE: Les routes API sont définies dans Express mais le projet utilise Next.js.
+MIGRATION À EFFECTUER:
+
+CRÉER la structure /app/api/ pour Next.js :
+
+FICHIER: /app/api/auth/login/route.ts
+typescriptimport { NextRequest, NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { db } from '@/server/db';
+import { users, employees } from '@/server/db/schema';
+import { eq } from 'drizzle-orm';
+import { z } from 'zod';
+import { env } from '@/shared/env-validation';
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+});
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { email, password } = loginSchema.parse(body);
+
+    // Find user
+    const user = await db.select()
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (!user.length) {
+      return NextResponse.json(
+        { error: 'Invalid credentials' },
+        { status: 401 }
+      );
+    }
+
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user[0].password);
+    if (!validPassword) {
+      return NextResponse.json(
+        { error: 'Invalid credentials' },
+        { status: 401 }
+      );
+    }
+
+    // Get employee data
+    const employee = await db.select()
+      .from(employees)
+      .where(eq(employees.userId, user[0].id))
+      .limit(1);
+
+    // Generate tokens
+    const accessToken = jwt.sign(
+      { 
+        id: user[0].id, 
+        email: user[0].email, 
+        role: user[0].role 
+      },
+      env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: user[0].id },
+      env.JWT_REFRESH_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Update refresh token in database
+    await db.update(users)
+      .set({ refreshToken })
+      .where(eq(users.id, user[0].id));
+
+    return NextResponse.json({
+      user: {
+        id: user[0].id,
+        email: user[0].email,
+        role: user[0].role,
+        employee: employee[0] || null,
+      },
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', details: error.errors },
+        { status: 400 }
+      );
+    }
+    
+    console.error('Login error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+FICHIER: /app/api/auth/register/route.ts
+typescriptimport { NextRequest, NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
+import { db } from '@/server/db';
+import { users, employees } from '@/server/db/schema';
+import { eq } from 'drizzle-orm';
+import { z } from 'zod';
+
+const registerSchema = z.object({
+  username: z.string().min(3).max(50),
+  email: z.string().email(),
+  password: z.string().min(8),
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  role: z.enum(['admin', 'employee']).default('employee'),
+});
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const data = registerSchema.parse(body);
+
+    // Check if user exists
+    const existingUser = await db.select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (existingUser.length) {
+      return NextResponse.json(
+        { error: 'User already exists' },
+        { status: 409 }
+      );
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(data.password, 12);
+
+    // Create user
+    const [newUser] = await db.insert(users)
+      .values({
+        username: data.username,
+        email: data.email,
+        password: hashedPassword,
+        role: data.role,
+      })
+      .returning();
+
+    // Create employee record
+    const [newEmployee] = await db.insert(employees)
+      .values({
+        userId: newUser.id,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+      })
+      .returning();
+
+    return NextResponse.json({
+      message: 'User created successfully',
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        role: newUser.role,
+      },
+    }, { status: 201 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', details: error.errors },
+        { status: 400 }
+      );
+    }
+    
+    console.error('Registration error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+CRÉER le middleware d'authentification Next.js :
+
+FICHIER: /middleware.ts
+typescriptimport { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import jwt from 'jsonwebtoken';
+import { env } from './shared/env-validation';
+
+export function middleware(request: NextRequest) {
+  // Check if it's an API route that needs protection
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    // Public routes that don't need authentication
+    const publicRoutes = ['/api/auth/login', '/api/auth/register', '/api/health'];
+    if (publicRoutes.some(route => request.nextUrl.pathname.startsWith(route))) {
+      return NextResponse.next();
+    }
+
+    // Get token from Authorization header
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.substring(7);
+
+    try {
+      // Verify token
+      const decoded = jwt.verify(token, env.JWT_SECRET) as any;
+      
+      // Add user info to headers for use in API routes
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set('x-user-id', decoded.id.toString());
+      requestHeaders.set('x-user-email', decoded.email);
+      requestHeaders.set('x-user-role', decoded.role);
+
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      });
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'Invalid token' },
+        { status: 401 }
+      );
+    }
+  }
+
+  // Check if it's a protected page route
+  if (request.nextUrl.pathname.startsWith('/admin')) {
+    const token = request.cookies.get('auth-token');
+    if (!token) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+  }
+
+  if (request.nextUrl.pathname.startsWith('/employee')) {
+    const token = request.cookies.get('auth-token');
+    if (!token) {
+      return NextResponse.redirect(new URL('/login', request.url));
+    }
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/api/:path*', '/admin/:path*', '/employee/:path*'],
+};
+
+SUPPRIMER les anciens fichiers Express :
+
+
+Supprimer /server/routes.ts
+Supprimer /server/index.ts
+Supprimer /server/vite.ts
+
+VALIDATION:
+
+Les routes API doivent être accessibles sous /api/*
+L'authentification doit fonctionner
+Les pages protégées doivent rediriger vers /login
+"""
