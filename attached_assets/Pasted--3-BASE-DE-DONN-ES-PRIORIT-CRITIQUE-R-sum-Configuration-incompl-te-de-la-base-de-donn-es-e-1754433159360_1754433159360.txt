@@ -1,0 +1,269 @@
+#3 - [BASE DE DONNÉES] - PRIORITÉ: CRITIQUE
+Résumé: Configuration incomplète de la base de données et migrations manquantes
+Détails:
+
+Fichier(s) concerné(s): /drizzle.config.ts (manquant), /server/db/ (manquant)
+Nature du problème: Pas de schéma de base de données défini, pas de migrations
+Impact: Impossible de créer/gérer la base de données
+Contexte: Le projet utilise Drizzle ORM mais sans configuration
+
+PROMPT POUR L'ASSISTANT REPLIT:
+"""
+CONTEXTE: ClockPilot utilise Drizzle ORM avec PostgreSQL mais n'a pas de schéma défini.
+FICHIER À CRÉER: /drizzle.config.ts
+typescriptimport { defineConfig } from 'drizzle-kit';
+import { env } from './shared/env-validation';
+
+export default defineConfig({
+  schema: './server/db/schema.ts',
+  out: './server/db/migrations',
+  dialect: 'postgresql',
+  dbCredentials: {
+    url: env.DATABASE_URL,
+  },
+  verbose: true,
+  strict: true,
+});
+FICHIER À CRÉER: /server/db/schema.ts
+typescriptimport { pgTable, serial, varchar, text, timestamp, integer, boolean, decimal, jsonb, uuid, index, uniqueIndex, foreignKey } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
+
+// Users table
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  username: varchar('username', { length: 50 }).notNull().unique(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  password: text('password').notNull(),
+  role: varchar('role', { length: 20 }).notNull().default('employee'),
+  refreshToken: text('refresh_token'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => {
+  return {
+    emailIdx: index('idx_users_email').on(table.email),
+    usernameIdx: index('idx_users_username').on(table.username),
+  };
+});
+
+// Employees table
+export const employees = pgTable('employees', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  employeeCode: varchar('employee_code', { length: 20 }).unique(),
+  firstName: varchar('first_name', { length: 100 }).notNull(),
+  lastName: varchar('last_name', { length: 100 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  phone: varchar('phone', { length: 20 }),
+  position: varchar('position', { length: 100 }),
+  departmentId: integer('department_id').references(() => departments.id),
+  managerId: integer('manager_id').references(() => employees.id),
+  hireDate: timestamp('hire_date'),
+  contractType: varchar('contract_type', { length: 50 }),
+  workingHours: integer('working_hours').default(35),
+  hourlyRate: decimal('hourly_rate', { precision: 10, scale: 2 }),
+  isActive: boolean('is_active').default(true),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => {
+  return {
+    userIdx: index('idx_employees_user').on(table.userId),
+    deptIdx: index('idx_employees_dept').on(table.departmentId),
+    managerIdx: index('idx_employees_manager').on(table.managerId),
+    codeIdx: uniqueIndex('idx_employees_code').on(table.employeeCode),
+  };
+});
+
+// Departments table
+export const departments = pgTable('departments', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 100 }).notNull(),
+  code: varchar('code', { length: 20 }).unique(),
+  description: text('description'),
+  managerId: integer('manager_id').references(() => employees.id),
+  parentId: integer('parent_id').references(() => departments.id),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Planning table
+export const planning = pgTable('planning', {
+  id: serial('id').primaryKey(),
+  employeeId: integer('employee_id').notNull().references(() => employees.id),
+  date: timestamp('date').notNull(),
+  startTime: timestamp('start_time').notNull(),
+  endTime: timestamp('end_time').notNull(),
+  breakDuration: integer('break_duration').default(0),
+  status: varchar('status', { length: 20 }).default('draft'),
+  shiftType: varchar('shift_type', { length: 50 }),
+  locationId: integer('location_id'),
+  notes: text('notes'),
+  validatedBy: integer('validated_by').references(() => users.id),
+  validatedAt: timestamp('validated_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => {
+  return {
+    employeeIdx: index('idx_planning_employee').on(table.employeeId),
+    dateIdx: index('idx_planning_date').on(table.date),
+    statusIdx: index('idx_planning_status').on(table.status),
+  };
+});
+
+// Time Entries table
+export const timeEntries = pgTable('time_entries', {
+  id: serial('id').primaryKey(),
+  employeeId: integer('employee_id').notNull().references(() => employees.id),
+  planningId: integer('planning_id').references(() => planning.id),
+  date: timestamp('date').notNull(),
+  checkIn: timestamp('check_in').notNull(),
+  checkOut: timestamp('check_out'),
+  breakDuration: integer('break_duration').default(0),
+  totalHours: decimal('total_hours', { precision: 5, scale: 2 }),
+  overtimeHours: decimal('overtime_hours', { precision: 5, scale: 2 }).default('0'),
+  status: varchar('status', { length: 20 }).default('pending'),
+  entryType: varchar('entry_type', { length: 20 }).default('manual'),
+  locationLat: decimal('location_lat', { precision: 10, scale: 7 }),
+  locationLng: decimal('location_lng', { precision: 10, scale: 7 }),
+  notes: text('notes'),
+  validatedBy: integer('validated_by').references(() => users.id),
+  validatedAt: timestamp('validated_at'),
+  anomalies: jsonb('anomalies'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => {
+  return {
+    employeeIdx: index('idx_time_entries_employee').on(table.employeeId),
+    dateIdx: index('idx_time_entries_date').on(table.date),
+    statusIdx: index('idx_time_entries_status').on(table.status),
+    planningIdx: index('idx_time_entries_planning').on(table.planningId),
+  };
+});
+
+// Projects table
+export const projects = pgTable('projects', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 200 }).notNull(),
+  description: text('description'),
+  status: varchar('status', { length: 20 }).default('active'),
+  startDate: timestamp('start_date'),
+  endDate: timestamp('end_date'),
+  budget: decimal('budget', { precision: 15, scale: 2 }),
+  spent: decimal('spent', { precision: 15, scale: 2 }).default('0'),
+  progress: integer('progress').default(0),
+  clientId: integer('client_id'),
+  managerId: integer('manager_id').references(() => employees.id),
+  departmentId: integer('department_id').references(() => departments.id),
+  repositoryUrl: text('repository_url'),
+  documentationUrl: text('documentation_url'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Project Members table
+export const projectMembers = pgTable('project_members', {
+  id: serial('id').primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id),
+  employeeId: integer('employee_id').notNull().references(() => employees.id),
+  role: varchar('role', { length: 50 }).default('member'),
+  allocation: integer('allocation').default(100),
+  startDate: timestamp('start_date'),
+  endDate: timestamp('end_date'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => {
+  return {
+    uniqueMember: uniqueIndex('idx_unique_project_member').on(table.projectId, table.employeeId),
+  };
+});
+
+// Tasks table
+export const tasks = pgTable('tasks', {
+  id: serial('id').primaryKey(),
+  projectId: uuid('project_id').references(() => projects.id),
+  title: varchar('title', { length: 200 }).notNull(),
+  description: text('description'),
+  assigneeId: integer('assignee_id').references(() => employees.id),
+  priority: varchar('priority', { length: 20 }).default('medium'),
+  status: varchar('status', { length: 20 }).default('todo'),
+  dueDate: timestamp('due_date'),
+  estimatedHours: decimal('estimated_hours', { precision: 5, scale: 2 }),
+  actualHours: decimal('actual_hours', { precision: 5, scale: 2 }),
+  completedAt: timestamp('completed_at'),
+  createdBy: integer('created_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Notifications table
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  type: varchar('type', { length: 50 }).notNull(),
+  title: varchar('title', { length: 200 }).notNull(),
+  message: text('message'),
+  data: jsonb('data'),
+  isRead: boolean('is_read').default(false),
+  readAt: timestamp('read_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => {
+  return {
+    userIdx: index('idx_notifications_user').on(table.userId),
+    readIdx: index('idx_notifications_read').on(table.isRead),
+  };
+});
+
+// Relations
+export const usersRelations = relations(users, ({ one, many }) => ({
+  employee: one(employees, {
+    fields: [users.id],
+    references: [employees.userId],
+  }),
+  notifications: many(notifications),
+}));
+
+export const employeesRelations = relations(employees, ({ one, many }) => ({
+  user: one(users, {
+    fields: [employees.userId],
+    references: [users.id],
+  }),
+  department: one(departments, {
+    fields: [employees.departmentId],
+    references: [departments.id],
+  }),
+  manager: one(employees, {
+    fields: [employees.managerId],
+    references: [employees.id],
+  }),
+  subordinates: many(employees),
+  planning: many(planning),
+  timeEntries: many(timeEntries),
+  projectMemberships: many(projectMembers),
+  tasks: many(tasks),
+}));
+
+// Export types
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type Employee = typeof employees.$inferSelect;
+export type NewEmployee = typeof employees.$inferInsert;
+export type Department = typeof departments.$inferSelect;
+export type Planning = typeof planning.$inferSelect;
+export type TimeEntry = typeof timeEntries.$inferSelect;
+export type Project = typeof projects.$inferSelect;
+export type Task = typeof tasks.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+COMMANDES À EXÉCUTER:
+
+npm install drizzle-orm @neondatabase/serverless
+npm install -D drizzle-kit
+npx drizzle-kit generate
+npx drizzle-kit migrate
+
+VALIDATION:
+
+Les migrations doivent être générées dans /server/db/migrations
+La base de données doit être créée avec toutes les tables
+"""
