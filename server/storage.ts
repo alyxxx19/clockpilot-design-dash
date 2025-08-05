@@ -36,6 +36,8 @@ import {
   type InsertTaskApi,
   type UpdateTaskApi,
   type UpdateTaskStatusApi,
+  type Validation,
+  type InsertValidation,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, like, or, isNull, isNotNull, ilike, count, inArray } from "drizzle-orm";
@@ -475,7 +477,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(departments, eq(employees.department_id, departments.id));
 
     // Apply filters using QueryBuilder
-    baseQuery = queryBuilder.applyFilters(baseQuery, filterOptions, tableColumns);
+    baseQuery = queryBuilder.applyFilters(baseQuery as any, filterOptions, tableColumns) as unknown as typeof baseQuery;
 
     // Handle special boolean filters manually (hasEmail/hasPhone)
     if (filters?.hasEmail !== undefined) {
@@ -490,10 +492,10 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Apply sorting using QueryBuilder
-    baseQuery = queryBuilder.applySort(baseQuery, sortOptions, tableColumns);
+    baseQuery = queryBuilder.applySort(baseQuery as any, sortOptions, tableColumns) as unknown as typeof baseQuery;
 
     // Apply pagination using QueryBuilder
-    const query = queryBuilder.applyPagination(baseQuery, paginationOptions);
+    const query = queryBuilder.applyPagination(baseQuery as any, paginationOptions) as unknown as typeof baseQuery;
 
     // Build count query
     let countQuery = db
@@ -503,7 +505,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(departments, eq(employees.department_id, departments.id));
 
     // Apply same filters to count query
-    countQuery = queryBuilder.applyFilters(countQuery, filterOptions, tableColumns);
+    countQuery = queryBuilder.applyFilters(countQuery as any, filterOptions, tableColumns) as unknown as typeof countQuery;
     
     // Handle special boolean filters for count query
     if (filters?.hasEmail !== undefined) {
@@ -806,11 +808,11 @@ export class DatabaseStorage implements IStorage {
       );
 
     if (employeeId) {
-      query = query.where(eq(planningEntries.employee_id, employeeId));
+      query = query.where(eq(planningEntries.employee_id, employeeId)) as typeof query;
     }
 
     if (departmentId) {
-      query = query.where(eq(employees.department_id, departmentId));
+      query = query.where(eq(employees.department_id, departmentId)) as typeof query;
     }
 
     return await query.orderBy(asc(planningEntries.date), asc(planningEntries.start_time));
@@ -961,13 +963,13 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(projects, eq(timeEntries.project_id, projects.id));
 
     // Apply filters using QueryBuilder
-    baseQuery = queryBuilder.applyFilters(baseQuery, filterOptions, tableColumns);
+    baseQuery = queryBuilder.applyFilters(baseQuery as any, filterOptions, tableColumns) as unknown as typeof baseQuery;
 
     // Apply sorting using QueryBuilder
-    baseQuery = queryBuilder.applySort(baseQuery, sortOptions, tableColumns);
+    baseQuery = queryBuilder.applySort(baseQuery as any, sortOptions, tableColumns) as unknown as typeof baseQuery;
 
     // Apply pagination using QueryBuilder
-    const query = queryBuilder.applyPagination(baseQuery, paginationOptions);
+    const query = queryBuilder.applyPagination(baseQuery as any, paginationOptions) as unknown as typeof baseQuery;
 
     // Build count query
     let countQuery = db
@@ -977,12 +979,12 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(projects, eq(timeEntries.project_id, projects.id));
 
     // Apply same filters to count query
-    countQuery = queryBuilder.applyFilters(countQuery, filterOptions, tableColumns);
+    countQuery = queryBuilder.applyFilters(countQuery as any, filterOptions, tableColumns) as unknown as typeof countQuery;
 
     // Execute both queries in parallel
     const [timeEntriesResult, countResult] = await Promise.all([
-      query,
-      countQuery
+      query as any,
+      countQuery as any
     ]);
 
     const total = countResult[0]?.count || 0;
@@ -1124,13 +1126,13 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(departments, eq(employees.department_id, departments.id));
 
     // Apply filters using QueryBuilder
-    baseQuery = queryBuilder.applyFilters(baseQuery, filterOptions, tableColumns);
+    baseQuery = queryBuilder.applyFilters(baseQuery as any, filterOptions, tableColumns) as unknown as typeof baseQuery;
 
     // Apply sorting using QueryBuilder
-    baseQuery = queryBuilder.applySort(baseQuery, sortOptions, tableColumns);
+    baseQuery = queryBuilder.applySort(baseQuery as any, sortOptions, tableColumns) as unknown as typeof baseQuery;
 
     // Apply pagination using QueryBuilder
-    const query = queryBuilder.applyPagination(baseQuery, paginationOptions);
+    const query = queryBuilder.applyPagination(baseQuery as any, paginationOptions) as unknown as typeof baseQuery;
 
     // Build count query
     let countQuery = db
@@ -1140,12 +1142,12 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(departments, eq(employees.department_id, departments.id));
 
     // Apply same filters to count query
-    countQuery = queryBuilder.applyFilters(countQuery, filterOptions, tableColumns);
+    countQuery = queryBuilder.applyFilters(countQuery as any, filterOptions, tableColumns) as unknown as typeof countQuery;
 
     // Execute both queries in parallel
     const [planningResult, countResult] = await Promise.all([
-      query,
-      countQuery
+      query as any,
+      countQuery as any
     ]);
 
     const total = countResult[0]?.count || 0;
