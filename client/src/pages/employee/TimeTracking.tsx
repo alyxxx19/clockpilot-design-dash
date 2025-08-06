@@ -195,9 +195,17 @@ export default function TimeTracking() {
     if (Array.isArray(todayEntries)) {
       todayEntries.forEach((entry: TimeEntry) => {
         if (entry.clockIn && entry.type === 'work') {
-          const clockInTime = new Date(entry.clockIn);
-          const clockOutTime = entry.clockOut ? new Date(entry.clockOut) : currentTime;
-          totalMinutes += differenceInMinutes(clockOutTime, clockInTime);
+          try {
+            const clockInTime = new Date(entry.clockIn);
+            const clockOutTime = entry.clockOut ? new Date(entry.clockOut) : currentTime;
+            
+            // Validate that dates are valid
+            if (!isNaN(clockInTime.getTime()) && !isNaN(clockOutTime.getTime())) {
+              totalMinutes += differenceInMinutes(clockOutTime, clockInTime);
+            }
+          } catch (error) {
+            console.warn('Invalid time entry found:', entry.clockIn, entry.clockOut);
+          }
         }
       });
     }
@@ -349,7 +357,14 @@ export default function TimeTracking() {
             {isClockedIn && currentEntry && (
               <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
                 <p className="text-sm text-green-800 dark:text-green-200">
-                  Pointé depuis {format(new Date(currentEntry.clockIn), 'HH:mm', { locale: fr })}
+                  {(() => {
+                    try {
+                      const clockInDate = new Date(currentEntry.clockIn);
+                      return `Pointé depuis ${format(clockInDate, 'HH:mm', { locale: fr })}`;
+                    } catch {
+                      return 'Pointé depuis --:--';
+                    }
+                  })()}
                 </p>
                 {currentEntry.location && (
                   <div className="flex items-center justify-center gap-1 mt-1">
@@ -413,13 +428,23 @@ export default function TimeTracking() {
                         {entry.type === 'work' ? 'Travail' : 'Pause'}
                       </div>
                       <div className="text-sm text-gray-600 dark:text-gray-400">
-                        Entrée: {format(new Date(entry.clockIn), 'HH:mm', { locale: fr })}
-                        {entry.clockOut && (
-                          <span>
-                            {' - Sortie: '}
-                            {format(new Date(entry.clockOut), 'HH:mm', { locale: fr })}
-                          </span>
-                        )}
+                        {(() => {
+                          try {
+                            const clockInTime = format(new Date(entry.clockIn), 'HH:mm', { locale: fr });
+                            let result = `Entrée: ${clockInTime}`;
+                            if (entry.clockOut) {
+                              try {
+                                const clockOutTime = format(new Date(entry.clockOut), 'HH:mm', { locale: fr });
+                                result += ` - Sortie: ${clockOutTime}`;
+                              } catch {
+                                result += ' - Sortie: --:--';
+                              }
+                            }
+                            return result;
+                          } catch {
+                            return 'Entrée: --:--';
+                          }
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -427,7 +452,18 @@ export default function TimeTracking() {
                   <div className="text-right">
                     {entry.clockOut ? (
                       <Badge variant="outline" className="text-green-600 border-green-600">
-                        {differenceInMinutes(new Date(entry.clockOut), new Date(entry.clockIn))}min
+                        {(() => {
+                          try {
+                            const clockInTime = new Date(entry.clockIn);
+                            const clockOutTime = new Date(entry.clockOut);
+                            if (!isNaN(clockInTime.getTime()) && !isNaN(clockOutTime.getTime())) {
+                              return `${differenceInMinutes(clockOutTime, clockInTime)}min`;
+                            }
+                            return '--min';
+                          } catch {
+                            return '--min';
+                          }
+                        })()}
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="text-blue-600 border-blue-600">

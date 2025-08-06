@@ -472,13 +472,6 @@ export const TimeEntry: React.FC = () => {
                   Aujourd'hui
                 </Button>
                 <ExportButton 
-                  type="time-entries" 
-                  options={{
-                    dateRange: {
-                      start: selectedDate.toISOString().split('T')[0],
-                      end: selectedDate.toISOString().split('T')[0]
-                    }
-                  }}
                   className="size-sm"
                 />
               </div>
